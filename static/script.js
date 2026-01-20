@@ -15,6 +15,7 @@ class TradingApp {
         this.lastIndicators = null;
         this.lastChartTitle = '';
         this.subscribedSymbols = new Set();
+        this.socketSubscriptions = new Set();
         this.operations = [];
         
         this.init();
@@ -46,15 +47,23 @@ class TradingApp {
             console.log('Conectado ao servidor WebSocket');
             this.updateConnectionStatus(true);
             this.showToast('Conectado ao servidor em tempo real', 'success');
+            this.socketSubscriptions.clear();
             
             // Subscribe to default symbols
-            this.subscribeToSymbol(this.currentSymbol);
+            if (this.subscribedSymbols.size === 0) {
+                this.subscribeToSymbol(this.currentSymbol);
+            } else {
+                Array.from(this.subscribedSymbols).forEach(symbol => {
+                    this.subscribeToSymbol(symbol);
+                });
+            }
         });
         
         this.socket.on('disconnect', () => {
             console.log('Desconectado do servidor WebSocket');
             this.updateConnectionStatus(false);
             this.showToast('Conexão perdida. Tentando reconectar...', 'warning');
+            this.socketSubscriptions.clear();
         });
         
         this.socket.on('price_update', (data) => {
@@ -102,6 +111,8 @@ class TradingApp {
             
             // Load recent operations
             await this.loadRecentOperations();
+
+            this.updateSymbolButtons(this.currentSymbol);
             
         } catch (error) {
             console.error('Erro ao carregar dados do dashboard:', error);
@@ -112,6 +123,7 @@ class TradingApp {
     createStockItem(stock) {
         const div = document.createElement('div');
         div.className = 'list-group-item list-group-item-action';
+        div.setAttribute('data-symbol', stock.symbol);
         div.innerHTML = `
             <div class="d-flex w-100 justify-content-between align-items-center">
                 <div>
@@ -129,12 +141,17 @@ class TradingApp {
                 </div>
             </div>
         `;
+
+        div.addEventListener('click', () => {
+            this.changeSymbol(stock.symbol);
+        });
         return div;
     }
     
     async loadChart(symbol, interval) {
         try {
-            const response = await fetch(`/api/chart/${symbol}/${interval}`);
+            const normalizedSymbol = (symbol || '').toUpperCase();
+            const response = await fetch(`/api/chart/${normalizedSymbol}/${interval}`);
             const data = await response.json();
             
             if (data.error) {
@@ -143,7 +160,7 @@ class TradingApp {
             
             this.lastSeries = data.series;
             this.lastIndicators = data.indicators;
-            const activeSymbol = data.symbol || symbol;
+            const activeSymbol = (data.symbol || normalizedSymbol || '').toUpperCase();
             const chartTitle = `${activeSymbol} - ${this.getIntervalName(interval)}`;
             this.lastChartTitle = chartTitle;
 
@@ -162,6 +179,10 @@ class TradingApp {
                 chartSymbolInput.value = activeSymbol;
             }
             document.getElementById('chart-title').textContent = chartTitle;
+
+            this.updateSymbolButtons(activeSymbol);
+            this.syncSymbolInputs(activeSymbol);
+            this.subscribeToSymbol(activeSymbol);
 
             if (this.socket) {
                 this.socket.emit('request_chart', {
@@ -351,6 +372,65 @@ class TradingApp {
         if (container && this.charts[containerId]) {
             Plotly.Plots.resize(container);
         }
+    }
+
+    updateSymbolButtons(symbol) {
+        if (!symbol) {
+            return;
+        }
+
+        const normalized = symbol.toUpperCase();
+
+        document.querySelectorAll('.symbol-toggle').forEach(btn => {
+            const btnSymbol = (btn.getAttribute('data-symbol') || '').toUpperCase();
+            const isActive = btnSymbol === normalized;
+            btn.classList.toggle('active', isActive);
+        });
+
+        document.querySelectorAll('#stocks-list .list-group-item[data-symbol]').forEach(item => {
+            const itemSymbol = (item.getAttribute('data-symbol') || '').toUpperCase();
+            const isActive = itemSymbol === normalized;
+            item.classList.toggle('active-symbol', isActive);
+        });
+    }
+
+    syncSymbolInputs(symbol) {
+        const normalized = (symbol || this.currentSymbol || '').toUpperCase();
+
+        const chartInput = document.getElementById('chart-symbol-input');
+        if (chartInput && document.activeElement !== chartInput) {
+            chartInput.value = normalized;
+        }
+
+        const quickSymbolInput = document.getElementById('quick-symbol');
+        if (quickSymbolInput && document.activeElement !== quickSymbolInput) {
+            quickSymbolInput.value = normalized;
+        }
+
+        const operationSymbolInput = document.getElementById('operation-symbol');
+        if (operationSymbolInput && !operationSymbolInput.value) {
+            operationSymbolInput.value = normalized;
+        }
+    }
+
+    changeSymbol(symbol) {
+        const normalized = (symbol || '').trim().toUpperCase();
+        if (!normalized) {
+            return;
+        }
+
+        if (normalized === this.currentSymbol) {
+            this.updateSymbolButtons(normalized);
+            this.syncSymbolInputs(normalized);
+            return Promise.resolve();
+        }
+
+        this.currentSymbol = normalized;
+        this.updateSymbolButtons(normalized);
+        this.syncSymbolInputs(normalized);
+        this.subscribeToSymbol(normalized);
+
+        return this.loadChart(normalized, this.currentInterval);
     }
     
     updateIndicators(indicators) {
@@ -592,22 +672,41 @@ class TradingApp {
     }
     
     subscribeToSymbol(symbol) {
-        if (!this.subscribedSymbols.has(symbol)) {
-            this.socket.emit('subscribe', { symbol });
-            this.subscribedSymbols.add(symbol);
+        const normalized = (symbol || '').trim().toUpperCase();
+        if (!normalized) {
+            return;
+        }
+
+        if (!this.subscribedSymbols.has(normalized)) {
+            this.subscribedSymbols.add(normalized);
+        }
+
+        if (this.socket && this.socket.connected && !this.socketSubscriptions.has(normalized)) {
+            this.socket.emit('subscribe', { symbol: normalized });
+            this.socketSubscriptions.add(normalized);
         }
     }
     
     unsubscribeFromSymbol(symbol) {
-        if (this.subscribedSymbols.has(symbol)) {
-            this.socket.emit('unsubscribe', { symbol });
-            this.subscribedSymbols.delete(symbol);
+        const normalized = (symbol || '').trim().toUpperCase();
+        if (!normalized) {
+            return;
+        }
+
+        if (this.subscribedSymbols.has(normalized)) {
+            if (this.socket && this.socket.connected) {
+                this.socket.emit('unsubscribe', { symbol: normalized });
+            }
+            this.subscribedSymbols.delete(normalized);
+            this.socketSubscriptions.delete(normalized);
         }
     }
     
     handlePriceUpdate(data) {
+        const incomingSymbol = (data.symbol || '').toUpperCase();
+        const currentSymbol = (this.currentSymbol || '').toUpperCase();
         // Update price displays
-        document.querySelectorAll(`.price-display[data-symbol="${data.symbol}"]`).forEach(el => {
+        document.querySelectorAll(`.price-display[data-symbol="${incomingSymbol}"]`).forEach(el => {
             const oldPrice = parseFloat(el.textContent.replace('R$ ', ''));
             const newPrice = data.data.price;
             
@@ -626,7 +725,7 @@ class TradingApp {
         });
         
         // Update current symbol if it's the one being viewed
-        if (data.symbol === this.currentSymbol) {
+        if (incomingSymbol === currentSymbol) {
             document.getElementById('current-price').textContent = 
                 `R$ ${data.data.price.toFixed(2)}`;
             document.getElementById('price-change').textContent = 
@@ -638,7 +737,9 @@ class TradingApp {
     
     handleChartData(data) {
         // Update chart if it's for the current symbol and interval
-        if (data.symbol === this.currentSymbol && data.interval === this.currentInterval) {
+        const incomingSymbol = (data.symbol || '').toUpperCase();
+        const currentSymbol = (this.currentSymbol || '').toUpperCase();
+        if (incomingSymbol === currentSymbol && data.interval === this.currentInterval) {
             if (!data.series) {
                 console.warn('Atualização de chart sem série recebida', data);
                 return;
@@ -656,11 +757,15 @@ class TradingApp {
             }
             this.resizeChart('analysis-chart');
             this.resizeChart('main-chart');
+            this.updateSymbolButtons(data.symbol);
+            this.syncSymbolInputs(data.symbol);
         }
     }
 
     handleSectionChange(section) {
         if (section === 'chart') {
+            this.updateSymbolButtons(this.currentSymbol);
+            this.syncSymbolInputs(this.currentSymbol);
             if (this.lastSeries) {
                 this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', this.lastChartTitle);
                 this.resizeChart('analysis-chart');
@@ -783,6 +888,14 @@ class TradingApp {
     }
     
     setupEventListeners() {
+        // Symbol toggle buttons
+        document.querySelectorAll('.symbol-toggle').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const targetSymbol = e.currentTarget.getAttribute('data-symbol');
+                this.changeSymbol(targetSymbol);
+            });
+        });
+        
         // Timeframe buttons
         document.querySelectorAll('.timeframe-btn, .timeframe-btn-chart').forEach(btn => {
             btn.addEventListener('click', (e) => {
