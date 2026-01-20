@@ -1,3 +1,9 @@
 Flask
 plotly
 weasyprint
+pandas
+kaleido
+yfinance
+mplfinance
+flask-socketio 
+eventlet

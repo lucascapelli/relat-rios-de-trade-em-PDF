@@ -1,18 +1,1377 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request, jsonify, send_from_directory
 import threading
 import webbrowser
 import time
+import os
+import sqlite3
+import base64
+import io
+import json
+import random
+from datetime import datetime, timedelta
+import pandas as pd
+import numpy as np
+import yfinance as yf
+import mplfinance as mpf
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import plotly.graph_objs as go
+import plotly.io as pio
+from weasyprint import HTML
+import plotly
+from flask_socketio import SocketIO, emit, join_room, leave_room
+import requests
+import pytz
+import pandas_ta as ta
+from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Any, Tuple
+from abc import ABC, abstractmethod
+import logging
 
+# Configuração de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# ==================== CONSTANTES E CONFIGURAÇÕES ====================
+
+APP_DIR = os.path.abspath(os.path.dirname(__file__))
+REPORTS_DIR = os.path.join(APP_DIR, 'reports')
+DB_PATH = os.path.join(APP_DIR, 'database.db')
+CACHE_DIR = os.path.join(APP_DIR, 'cache')
+os.makedirs(REPORTS_DIR, exist_ok=True)
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+BR_TZ = pytz.timezone('America/Sao_Paulo')
+
+# ==================== DATACLASSES ====================
+
+@dataclass
+class TickerInfo:
+    """Informações de um ativo"""
+    symbol: str
+    price: float
+    change: float
+    change_percent: float
+    open: float
+    high: float
+    low: float
+    volume: int
+    previous_close: float
+    name: str
+    currency: str = 'BRL'
+    market_cap: float = 0
+    timestamp: str = None
+    
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now(BR_TZ).strftime('%H:%M:%S')
+
+@dataclass
+class Operation:
+    """Dados de uma operação de trading"""
+    symbol: str
+    tipo: str  # COMPRA/VENDA
+    entrada: float
+    stop: float
+    alvo: float
+    quantidade: int
+    observacoes: str = ''
+    preco_atual: float = 0
+    pontos_alvo: float = 0
+    pontos_stop: float = 0
+    status: str = 'ABERTA'
+    timeframe: str = '15m'
+    created_at: str = None
+    
+    def __post_init__(self):
+        if self.created_at is None:
+            self.created_at = datetime.now(BR_TZ).isoformat()
+        
+        # Calcula pontos
+        self.pontos_alvo = self.alvo - self.entrada
+        self.pontos_stop = self.entrada - self.stop
+
+@dataclass
+class Candle:
+    """Dados de um candle"""
+    time: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    
+    def to_dict(self):
+        return {
+            'time': self.time.isoformat(),
+            'time_str': self.time.strftime('%Y-%m-%d %H:%M:%S'),
+            'open': self.open,
+            'high': self.high,
+            'low': self.low,
+            'close': self.close,
+            'volume': self.volume
+        }
+
+# ==================== CACHE ====================
+
+class CacheManager:
+    """Gerenciador de cache com expiração"""
+    
+    def __init__(self, expiry_seconds: int = 60):
+        self.cache: Dict[str, Tuple[Any, datetime]] = {}
+        self.expiry = expiry_seconds
+    
+    def get(self, key: str) -> Optional[Any]:
+        """Obtém valor do cache se não expirou"""
+        if key in self.cache:
+            data, timestamp = self.cache[key]
+            if (datetime.now() - timestamp).seconds < self.expiry:
+                return data
+        return None
+    
+    def set(self, key: str, value: Any):
+        """Armazena valor no cache"""
+        self.cache[key] = (value, datetime.now())
+    
+    def clear_expired(self):
+        """Remove itens expirados do cache"""
+        now = datetime.now()
+        expired_keys = [
+            key for key, (_, timestamp) in self.cache.items()
+            if (now - timestamp).seconds >= self.expiry
+        ]
+        for key in expired_keys:
+            del self.cache[key]
+
+# ==================== INDICADORES TÉCNICOS ====================
+
+class TechnicalIndicators:
+    """Classe para cálculo de indicadores técnicos"""
+    
+    @staticmethod
+    def calculate_all(df: pd.DataFrame) -> pd.DataFrame:
+        """Calcula todos os indicadores técnicos"""
+        df = df.copy()
+        
+        # Médias móveis simples
+        df['SMA_9'] = TechnicalIndicators._safe_calc(ta.sma, df['close'], 9)
+        df['SMA_21'] = TechnicalIndicators._safe_calc(ta.sma, df['close'], 21)
+        df['SMA_50'] = TechnicalIndicators._safe_calc(ta.sma, df['close'], 50)
+        
+        # Médias móveis exponenciais
+        df['EMA_12'] = TechnicalIndicators._safe_calc(ta.ema, df['close'], 12)
+        df['EMA_26'] = TechnicalIndicators._safe_calc(ta.ema, df['close'], 26)
+        
+        # RSI
+        df['RSI'] = TechnicalIndicators._safe_calc(ta.rsi, df['close'], 14)
+        
+        # MACD
+        macd = TechnicalIndicators._safe_calc(ta.macd, df['close'])
+        if macd is not None and not macd.empty:
+            TechnicalIndicators._add_macd_columns(df, macd)
+        
+        # Bollinger Bands
+        bb = TechnicalIndicators._safe_calc(ta.bbands, df['close'], length=20, std=2)
+        if bb is not None and not bb.empty:
+            TechnicalIndicators._add_bb_columns(df, bb)
+        
+        # ATR
+        df['ATR'] = TechnicalIndicators._safe_calc(
+            ta.atr, df['high'], df['low'], df['close'], 14
+        )
+        
+        # Volume médio
+        df['Volume_SMA'] = TechnicalIndicators._safe_calc(ta.sma, df['volume'], 20)
+        
+        # Suporte e resistência
+        if len(df) > 20:
+            df['Resistance'] = df['high'].rolling(window=20).max()
+            df['Support'] = df['low'].rolling(window=20).min()
+        
+        return df
+    
+    @staticmethod
+    def _safe_calc(func, *args, **kwargs):
+        """Executa cálculo de indicador com tratamento de erros"""
+        try:
+            result = func(*args, **kwargs)
+            return result
+        except Exception as e:
+            logger.debug(f"Erro ao calcular indicador {func.__name__}: {e}")
+            return None
+    
+    @staticmethod
+    def _add_macd_columns(df: pd.DataFrame, macd: pd.DataFrame):
+        """Adiciona colunas MACD ao DataFrame"""
+        for col in ['MACD_12_26_9', 'MACDs_12_26_9', 'MACDh_12_26_9']:
+            if col in macd.columns:
+                df[col.replace('_12_26_9', '')] = macd[col]
+    
+    @staticmethod
+    def _add_bb_columns(df: pd.DataFrame, bb: pd.DataFrame):
+        """Adiciona colunas Bollinger Bands ao DataFrame"""
+        column_map = {
+            'BBU_20_2.0': 'BB_upper',
+            'BBM_20_2.0': 'BB_middle',
+            'BBL_20_2.0': 'BB_lower'
+        }
+        for old_col, new_col in column_map.items():
+            if old_col in bb.columns:
+                df[new_col] = bb[old_col]
+
+# ==================== DADOS FINANCEIROS ====================
+
+class FinanceData:
+    """Classe responsável por obter dados financeiros"""
+    
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        self.tickers = self._load_tickers()
+        self.indicators = TechnicalIndicators()
+    
+    def _load_tickers(self) -> Dict[str, str]:
+        """Carrega lista de tickers da B3"""
+        try:
+            url = "https://raw.githubusercontent.com/guilhermecappi/b3-tickers/master/data/tickers.csv"
+            df = pd.read_csv(url)
+            return dict(zip(df['ticker'], df['company']))
+        except Exception as e:
+            logger.warning(f"Erro ao carregar tickers: {e}")
+            return self._get_default_tickers()
+    
+    def _get_default_tickers(self) -> Dict[str, str]:
+        """Retorna tickers padrão como fallback"""
+        return {
+            'PETR4.SA': 'Petrobras PN',
+            'VALE3.SA': 'Vale ON',
+            'ITUB4.SA': 'Itaú Unibanco PN',
+            'BBDC4.SA': 'Bradesco PN',
+            'BBAS3.SA': 'Banco do Brasil ON',
+            'ABEV3.SA': 'Ambev ON',
+            'WEGE3.SA': 'Weg ON',
+            'MGLU3.SA': 'Magazine Luiza ON',
+            'VIIA3.SA': 'Via ON',
+            'BOVA11.SA': 'ETF Ibovespa'
+        }
+    
+    def get_ticker_info(self, symbol: str) -> TickerInfo:
+        """Obtém informações de um ativo"""
+        try:
+            # Normaliza símbolo
+            if not symbol.endswith('.SA') and symbol[-1].isdigit():
+                symbol = f"{symbol}.SA"
+            
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            hist = ticker.history(period='2d', interval='5m')
+            
+            if hist.empty:
+                return self._create_fallback_info(symbol)
+            
+            return self._parse_ticker_info(symbol, info, hist)
+            
+        except Exception as e:
+            logger.error(f"Erro ao buscar info para {symbol}: {e}")
+            return self._create_fallback_info(symbol)
+    
+    def _parse_ticker_info(self, symbol: str, info: Dict, hist: pd.DataFrame) -> TickerInfo:
+        """Parseia informações do ativo"""
+        last_close = float(hist['Close'].iloc[-1])
+        prev_close = float(hist['Close'].iloc[-2]) if len(hist) > 1 else last_close
+        
+        return TickerInfo(
+            symbol=symbol.replace('.SA', ''),
+            price=last_close,
+            change=last_close - prev_close,
+            change_percent=((last_close - prev_close) / prev_close * 100) if prev_close > 0 else 0,
+            open=float(hist['Open'].iloc[-1]) if 'Open' in hist.columns else last_close,
+            high=float(hist['High'].iloc[-1]) if 'High' in hist.columns else last_close,
+            low=float(hist['Low'].iloc[-1]) if 'Low' in hist.columns else last_close,
+            volume=int(hist['Volume'].iloc[-1]) if 'Volume' in hist.columns else 0,
+            previous_close=prev_close,
+            name=info.get('longName', info.get('shortName', symbol)),
+            currency=info.get('currency', 'BRL'),
+            market_cap=info.get('marketCap', 0)
+        )
+    
+    def _create_fallback_info(self, symbol: str) -> TickerInfo:
+        """Cria informações de fallback"""
+        return TickerInfo(
+            symbol=symbol.replace('.SA', ''),
+            price=100.0,
+            change=0,
+            change_percent=0,
+            open=100.0,
+            high=101.0,
+            low=99.0,
+            volume=1000000,
+            previous_close=100.0,
+            name=symbol,
+            currency='BRL'
+        )
+    
+    def get_candles(self, symbol: str, interval: str = '15m', periods: int = 100) -> pd.DataFrame:
+        """Obtém dados de candles"""
+        try:
+            # Normaliza símbolo
+            if not symbol.endswith('.SA') and symbol[-1].isdigit():
+                symbol_yf = f"{symbol}.SA"
+            else:
+                symbol_yf = symbol
+            
+            # Busca dados do yfinance
+            df = self._fetch_yfinance_data(symbol_yf, interval, periods)
+            
+            if df is None or df.empty:
+                logger.warning(f"Sem dados reais para {symbol}, usando fallback")
+                return self._generate_fallback_data(symbol, interval, periods)
+            
+            # Processa dados
+            df = self._process_candle_data(df, symbol_yf, periods)
+            
+            # Adiciona indicadores técnicos
+            df = self.indicators.calculate_all(df)
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Erro ao buscar candles para {symbol}: {e}")
+            return self._generate_fallback_data(symbol, interval, periods)
+    
+    def _fetch_yfinance_data(self, symbol: str, interval: str, periods: int) -> Optional[pd.DataFrame]:
+        """Busca dados do yfinance"""
+        interval_map = {
+            '1m': ('1m', '1d'), '5m': ('5m', '5d'), '15m': ('15m', '5d'),
+            '30m': ('30m', '10d'), '1h': ('60m', '30d'), '1d': ('1d', '3mo'),
+            '15min': ('15m', '5d'), '60min': ('60m', '30d'), 'daily': ('1d', '3mo')
+        }
+        
+        yf_interval, yf_period = interval_map.get(interval, ('15m', '5d'))
+        
+        try:
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(period=yf_period, interval=yf_interval, timeout=10)
+            return df if df is not None and not df.empty else None
+        except Exception as e:
+            logger.error(f"Erro yfinance para {symbol}: {e}")
+            return None
+    
+    def _process_candle_data(self, df: pd.DataFrame, symbol: str, periods: int) -> pd.DataFrame:
+        """Processa dados de candles"""
+        # Renomeia colunas
+        df = df.rename(columns={
+            'Open': 'open', 'High': 'high', 
+            'Low': 'low', 'Close': 'close', 
+            'Volume': 'volume'
+        })
+        
+        # Ajusta timezone
+        if df.index.tz is not None:
+            df.index = df.index.tz_convert(BR_TZ)
+        else:
+            df.index = df.index.tz_localize('UTC').tz_convert(BR_TZ)
+        
+        # Limita períodos
+        if len(df) > periods:
+            df = df.iloc[-periods:]
+        
+        # Adiciona colunas de tempo
+        df['time'] = df.index
+        df['time_str'] = df['time'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Valida candles
+        df = self._validate_candles(df)
+        
+        logger.info(f"Dados carregados para {symbol}: R$ {df['close'].iloc[-1]:.2f} ({len(df)} candles)")
+        
+        return df
+    
+    def _validate_candles(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Valida integridade dos candles"""
+        # Converte tipos
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Filtra candles inválidos
+        mask = (
+            (df['high'] >= df['low']) & 
+            (df['high'] >= df['open']) & 
+            (df['high'] >= df['close']) &
+            (df['low'] <= df['open']) & 
+            (df['low'] <= df['close'])
+        )
+        
+        return df[mask].copy()
+    
+    def _generate_fallback_data(self, symbol: str, interval: str, periods: int) -> pd.DataFrame:
+        """Gera dados de fallback realistas"""
+        config = {
+            '1m': {'freq': '1min', 'vol': 0.002},
+            '5m': {'freq': '5min', 'vol': 0.005},
+            '15m': {'freq': '15min', 'vol': 0.008},
+            '30m': {'freq': '30min', 'vol': 0.012},
+            '1h': {'freq': '1h', 'vol': 0.015},
+            '1d': {'freq': '1D', 'vol': 0.02}
+        }
+        
+        cfg = config.get(interval, config['15m'])
+        
+        # Gera timestamps
+        dates = pd.date_range(end=datetime.now(), periods=periods, freq=cfg['freq'])
+        
+        # Gera preços
+        base_price = 100 + (hash(symbol) % 100)
+        trend_direction = 1 if (hash(symbol) % 2) == 0 else -1
+        trend = np.linspace(0, trend_direction * cfg['vol'] * 20, periods)
+        noise = np.random.normal(0, cfg['vol'], periods)
+        close_prices = base_price * (1 + trend + noise.cumsum())
+        
+        # Gera OHLCV
+        data = []
+        for i in range(periods):
+            open_price = close_prices[i-1] if i > 0 else close_prices[i] * (1 + np.random.uniform(-0.005, 0.005))
+            close_price_val = close_prices[i]
+            
+            is_bullish = close_price_val >= open_price
+            body_range = abs(close_price_val - open_price)
+            wick_range = body_range + base_price * cfg['vol'] * 2
+            
+            if is_bullish:
+                low = open_price - np.random.uniform(0, wick_range * 0.3)
+                high = close_price_val + np.random.uniform(0, wick_range * 0.7)
+            else:
+                low = close_price_val - np.random.uniform(0, wick_range * 0.7)
+                high = open_price + np.random.uniform(0, wick_range * 0.3)
+            
+            # Garante validade
+            high = max(high, low + 0.01)
+            open_price = max(low, min(high, open_price))
+            close_price_val = max(low, min(high, close_price_val))
+            
+            volume = np.random.randint(10000, 1000000) * (1 + body_range/base_price)
+            
+            data.append({
+                'time': dates[i],
+                'time_str': dates[i].strftime('%Y-%m-%d %H:%M:%S'),
+                'open': round(open_price, 2),
+                'high': round(high, 2),
+                'low': round(low, 2),
+                'close': round(close_price_val, 2),
+                'volume': int(volume)
+            })
+        
+        df = pd.DataFrame(data)
+        df = self.indicators.calculate_all(df)
+        
+        logger.info(f"Fallback gerado para {symbol}: {len(df)} candles")
+        
+        return df
+
+# ==================== GERADOR DE GRÁFICOS ====================
+
+class ChartGenerator:
+    """Classe para geração de gráficos"""
+    
+    @staticmethod
+    def create_plotly_chart(df: pd.DataFrame, title: str = "", 
+                           show_volume: bool = True, show_indicators: bool = True) -> go.Figure:
+        """Cria gráfico Plotly interativo"""
+        if df is None or df.empty:
+            logger.warning("DataFrame vazio recebido para gráfico")
+            return go.Figure()
+        
+        df = ChartGenerator._prepare_dataframe(df)
+        
+        if len(df) < 2:
+            logger.warning(f"Poucos dados válidos: {len(df)} candles")
+            return go.Figure()
+        
+        # Cria candlestick
+        candlestick = go.Candlestick(
+            x=df['time'],
+            open=df['open'],
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
+            name='Preço',
+            increasing_line_color='#26a69a',
+            decreasing_line_color='#ef5350',
+            increasing_fillcolor='#26a69a',
+            decreasing_fillcolor='#ef5350',
+            line=dict(width=1),
+            whiskerwidth=0.8,
+            hoverinfo='text',
+            text=ChartGenerator._generate_hover_text(df)
+        )
+        
+        data = [candlestick]
+        
+        # Adiciona indicadores
+        if show_indicators:
+            data.extend(ChartGenerator._add_indicators(df))
+        
+        # Cria layout
+        layout = ChartGenerator._create_layout(title, show_volume)
+        
+        # Adiciona volume se necessário
+        if show_volume and 'volume' in df.columns:
+            data.append(ChartGenerator._create_volume_trace(df))
+            layout = ChartGenerator._add_volume_axis(layout)
+        
+        fig = go.Figure(data=data, layout=layout)
+        
+        # Adiciona range selector
+        fig = ChartGenerator._add_range_selector(fig)
+        
+        return fig
+    
+    @staticmethod
+    def _prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+        """Prepara DataFrame para plotagem"""
+        df = df.copy()
+        
+        # Garante coluna time
+        if 'time_str' in df.columns and 'time' not in df.columns:
+            df['time'] = pd.to_datetime(df['time_str'], errors='coerce')
+        elif 'time' in df.columns:
+            if not pd.api.types.is_datetime64_any_dtype(df['time']):
+                df['time'] = pd.to_datetime(df['time'], errors='coerce')
+        
+        # Remove timezone
+        if hasattr(df['time'].dt, 'tz') and df['time'].dt.tz is not None:
+            df['time'] = df['time'].dt.tz_localize(None)
+        
+        # Converte tipos
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Remove NaN e valida
+        df = df.dropna(subset=['open', 'high', 'low', 'close'])
+        df = df[
+            (df['high'] >= df['low']) & 
+            (df['close'] <= df['high']) & (df['close'] >= df['low']) &
+            (df['open'] <= df['high']) & (df['open'] >= df['low'])
+        ]
+        
+        return df
+    
+    @staticmethod
+    def _generate_hover_text(df: pd.DataFrame) -> List[str]:
+        """Gera texto para hover"""
+        return [
+            f"Abertura: R$ {o:.2f}<br>Máxima: R$ {h:.2f}<br>Mínima: R$ {l:.2f}<br>Fechamento: R$ {c:.2f}<br>Volume: {v:,.0f}"
+            for o, h, l, c, v in zip(
+                df['open'], df['high'], df['low'], 
+                df['close'], df.get('volume', [0]*len(df))
+            )
+        ]
+    
+    @staticmethod
+    def _add_indicators(df: pd.DataFrame) -> List[go.Scatter]:
+        """Adiciona traços de indicadores técnicos"""
+        traces = []
+        
+        # SMAs
+        for period, color in [(9, '#2196F3'), (21, '#FF9800')]:
+            col = f'SMA_{period}'
+            if col in df.columns and df[col].notna().sum() > 0:
+                traces.append(go.Scatter(
+                    x=df['time'], y=df[col],
+                    mode='lines',
+                    name=f'SMA {period}',
+                    line=dict(color=color, width=1.5),
+                    opacity=0.7
+                ))
+        
+        # Bollinger Bands
+        if all(col in df.columns for col in ['BB_upper', 'BB_lower', 'BB_middle']):
+            if df['BB_upper'].notna().sum() > 0:
+                traces.extend([
+                    go.Scatter(
+                        x=df['time'], y=df['BB_upper'],
+                        mode='lines',
+                        name='BB Superior',
+                        line=dict(color='rgba(158, 158, 158, 0.5)', width=1, dash='dash'),
+                        showlegend=False
+                    ),
+                    go.Scatter(
+                        x=df['time'], y=df['BB_lower'],
+                        mode='lines',
+                        name='BB Inferior',
+                        fill='tonexty',
+                        fillcolor='rgba(158, 158, 158, 0.1)',
+                        line=dict(color='rgba(158, 158, 158, 0.5)', width=1, dash='dash'),
+                        showlegend=False
+                    )
+                ])
+        
+        return traces
+    
+    @staticmethod
+    def _create_layout(title: str, show_volume: bool) -> go.Layout:
+        """Cria layout do gráfico"""
+        return go.Layout(
+            title=dict(
+                text=title,
+                font=dict(size=16, color='#2c3e50', family='Arial Black'),
+                x=0.5,
+                xanchor='center'
+            ),
+            xaxis=dict(
+                type='date',
+                gridcolor='#ecf0f1',
+                showgrid=True,
+                rangeslider=dict(visible=False),
+                nticks=15,
+                tickfont=dict(size=10)
+            ),
+            yaxis=dict(
+                title='Preço (R$)',
+                gridcolor='#ecf0f1',
+                showgrid=True,
+                side='right',
+                tickformat='.2f',
+                tickprefix='R$ ',
+                tickfont=dict(size=10)
+            ),
+            height=550,
+            margin=dict(l=50, r=60, t=70, b=50),
+            hovermode='x unified',
+            plot_bgcolor='white',
+            paper_bgcolor='#f8f9fa',
+            showlegend=True,
+            legend=dict(
+                x=0.01, y=0.99,
+                bgcolor='rgba(255, 255, 255, 0.95)',
+                bordercolor='#bdc3c7',
+                borderwidth=1,
+                font=dict(size=9)
+            ),
+            font=dict(family='Arial, sans-serif')
+        )
+    
+    @staticmethod
+    def _create_volume_trace(df: pd.DataFrame) -> go.Bar:
+        """Cria traço de volume"""
+        colors = [
+            'rgba(38, 166, 154, 0.6)' if c >= o else 'rgba(239, 83, 80, 0.6)'
+            for c, o in zip(df['close'], df['open'])
+        ]
+        
+        return go.Bar(
+            x=df['time'],
+            y=df['volume'],
+            name='Volume',
+            marker_color=colors,
+            opacity=0.7,
+            yaxis='y2',
+            hoverinfo='y'
+        )
+    
+    @staticmethod
+    def _add_volume_axis(layout: go.Layout) -> go.Layout:
+        """Adiciona eixo de volume ao layout"""
+        layout.update(
+            yaxis2=dict(
+                title='Volume',
+                overlaying='y',
+                side='left',
+                showgrid=False,
+                tickformat=',.0f',
+                tickfont=dict(size=9)
+            )
+        )
+        return layout
+    
+    @staticmethod
+    def _add_range_selector(fig: go.Figure) -> go.Figure:
+        """Adiciona seletor de range ao gráfico"""
+        fig.update_xaxes(
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=30, label="30min", step="minute", stepmode="backward"),
+                    dict(count=1, label="1h", step="hour", stepmode="backward"),
+                    dict(count=4, label="4h", step="hour", stepmode="backward"),
+                    dict(count=1, label="1d", step="day", stepmode="backward"),
+                    dict(step="all", label="Tudo")
+                ]),
+                bgcolor='rgba(255, 255, 255, 0.9)',
+                activecolor='#2196F3',
+                x=0.01, y=1.05,
+                font=dict(size=9)
+            )
+        )
+        return fig
+    
+    @staticmethod
+    def generate_chart_image(df: pd.DataFrame, title: str = "", 
+                            width: int = 800, height: int = 400) -> str:
+        """Gera imagem estática do gráfico para PDF"""
+        try:
+            if df is None or df.empty:
+                return ""
+            
+            df_plot = df.copy()
+            
+            # Prepara DataFrame
+            if 'time' in df_plot.columns:
+                df_plot.set_index('time', inplace=True)
+            
+            if df_plot.index.tz is not None:
+                df_plot.index = df_plot.index.tz_localize(None)
+            
+            # Salva indicadores
+            sma_9 = df_plot['SMA_9'].copy() if 'SMA_9' in df_plot.columns else None
+            sma_21 = df_plot['SMA_21'].copy() if 'SMA_21' in df_plot.columns else None
+            
+            # Renomeia colunas
+            df_plot = df_plot.rename(columns={
+                'open': 'Open', 'high': 'High',
+                'low': 'Low', 'close': 'Close',
+                'volume': 'Volume'
+            })
+            
+            # Verifica colunas necessárias
+            required_cols = ['Open', 'High', 'Low', 'Close']
+            if not all(col in df_plot.columns for col in required_cols):
+                return ""
+            
+            # Remove NaN
+            df_plot = df_plot[required_cols + (['Volume'] if 'Volume' in df_plot.columns else [])].dropna()
+            
+            if len(df_plot) < 2:
+                return ""
+            
+            # Configura estilo
+            mc = mpf.make_marketcolors(
+                up='#26a69a', down='#ef5350',
+                edge='inherit',
+                wick={'up': '#26a69a', 'down': '#ef5350'},
+                volume={'up': '#26a69a', 'down': '#ef5350'},
+            )
+            
+            s = mpf.make_mpf_style(
+                marketcolors=mc,
+                gridstyle='-',
+                gridcolor='#ecf0f1',
+                facecolor='white',
+                figcolor='white',
+                rc={'font.size': 9}
+            )
+            
+            # Adiciona médias móveis
+            addplot = []
+            for sma, color in [(sma_9, 'blue'), (sma_21, 'orange')]:
+                if sma is not None and sma.notna().sum() > 5:
+                    sma_aligned = sma.reindex(df_plot.index).dropna()
+                    if len(sma_aligned) > 0:
+                        addplot.append(mpf.make_addplot(sma_aligned, color=color, width=1.2))
+            
+            # Cria figura
+            fig, _ = mpf.plot(
+                df_plot,
+                type='candle',
+                style=s,
+                title=title,
+                ylabel='Preço (R$)',
+                volume=True if 'Volume' in df_plot.columns else False,
+                addplot=addplot if addplot else None,
+                figsize=(width/80, height/80),
+                returnfig=True,
+                warn_too_much_data=1000
+            )
+            
+            # Salva em base64
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png', dpi=100, bbox_inches='tight', facecolor='white')
+            plt.close(fig)
+            buf.seek(0)
+            
+            b64 = base64.b64encode(buf.read()).decode('utf-8')
+            return f"data:image/png;base64,{b64}"
+            
+        except Exception as e:
+            logger.error(f"Erro ao gerar imagem: {e}")
+            return ""
+
+# ==================== GERENCIADOR DE TEMPO REAL ====================
+
+class RealTimeManager:
+    """Gerenciador de atualizações em tempo real"""
+    
+    def __init__(self, socketio: SocketIO, finance_data: FinanceData, update_interval: int = 5):
+        self.socketio = socketio
+        self.finance_data = finance_data
+        self.update_interval = update_interval
+        self.active_symbols = set()
+        self.symbol_data = {}
+        self.running = False
+    
+    def update_symbol(self, symbol: str):
+        """Atualiza dados de um símbolo"""
+        try:
+            info = self.finance_data.get_ticker_info(symbol)
+            
+            if info:
+                self.symbol_data[symbol] = {
+                    **asdict(info),
+                    'timestamp': datetime.now(BR_TZ).isoformat(),
+                    'update_count': self.symbol_data.get(symbol, {}).get('update_count', 0) + 1
+                }
+                
+                # Emite atualização
+                self.socketio.emit('price_update', {
+                    'symbol': symbol,
+                    'data': asdict(info)
+                }, room=f"symbol_{symbol}")
+                
+                return info
+                
+        except Exception as e:
+            logger.error(f"Erro ao atualizar {symbol}: {e}")
+        
+        return None
+    
+    def start_updates(self):
+        """Inicia loop de atualizações"""
+        self.running = True
+        while self.running:
+            try:
+                symbols = list(self.active_symbols)
+                
+                if symbols:
+                    for symbol in symbols:
+                        self.update_symbol(symbol)
+                
+                time.sleep(self.update_interval)
+                
+            except Exception as e:
+                logger.error(f"Erro no loop de atualizações: {e}")
+                time.sleep(10)
+    
+    def stop_updates(self):
+        """Para as atualizações"""
+        self.running = False
+    
+    def subscribe(self, symbol: str):
+        """Inscreve em um símbolo"""
+        if not symbol.endswith('.SA') and symbol[-1].isdigit():
+            symbol = f"{symbol}.SA"
+        self.active_symbols.add(symbol)
+    
+    def unsubscribe(self, symbol: str):
+        """Cancela inscrição em um símbolo"""
+        if symbol in self.active_symbols:
+            self.active_symbols.remove(symbol)
+
+# ==================== BANCO DE DADOS ====================
+
+class Database:
+    """Classe para operações de banco de dados"""
+    
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self._init_db()
+    
+    def _init_db(self):
+        """Inicializa banco de dados"""
+        with sqlite3.connect(self.db_path) as con:
+            cur = con.cursor()
+            cur.execute('''
+            CREATE TABLE IF NOT EXISTS operations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT,
+                tipo TEXT,
+                entrada REAL,
+                stop REAL,
+                alvo REAL,
+                quantidade INTEGER,
+                observacoes TEXT,
+                preco_atual REAL,
+                pontos_alvo REAL,
+                pontos_stop REAL,
+                status TEXT,
+                created_at TEXT,
+                pdf_path TEXT,
+                timeframe TEXT,
+                indicators TEXT
+            )
+            ''')
+            con.commit()
+    
+    def insert_operation(self, operation: Operation, pdf_path: str = None, 
+                        indicators: Dict = None) -> int:
+        """Insere operação no banco de dados"""
+        with sqlite3.connect(self.db_path) as con:
+            cur = con.cursor()
+            cur.execute('''
+                INSERT INTO operations (
+                    symbol, tipo, entrada, stop, alvo, quantidade, observacoes,
+                    preco_atual, pontos_alvo, pontos_stop, status, created_at,
+                    pdf_path, timeframe, indicators
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                operation.symbol,
+                operation.tipo,
+                operation.entrada,
+                operation.stop,
+                operation.alvo,
+                operation.quantidade,
+                operation.observacoes,
+                operation.preco_atual,
+                operation.pontos_alvo,
+                operation.pontos_stop,
+                operation.status,
+                operation.created_at,
+                pdf_path,
+                operation.timeframe,
+                json.dumps(indicators) if indicators else '{}'
+            ))
+            con.commit()
+            return cur.lastrowid
+    
+    def get_operations(self, limit: int = 50) -> List[Dict]:
+        """Obtém histórico de operações"""
+        with sqlite3.connect(self.db_path) as con:
+            cur = con.cursor()
+            cur.execute('''
+                SELECT id, symbol, tipo, entrada, stop, alvo, quantidade,
+                       observacoes, preco_atual, status, created_at, pdf_path
+                FROM operations 
+                ORDER BY id DESC 
+                LIMIT ?
+            ''', (limit,))
+            rows = cur.fetchall()
+            
+            operations = []
+            for row in rows:
+                operations.append({
+                    'id': row[0],
+                    'symbol': row[1],
+                    'tipo': row[2],
+                    'entrada': row[3],
+                    'stop': row[4],
+                    'alvo': row[5],
+                    'quantidade': row[6],
+                    'observacoes': row[7],
+                    'preco_atual': row[8],
+                    'status': row[9],
+                    'created_at': row[10],
+                    'pdf_path': row[11]
+                })
+            
+            return operations
+
+# ==================== GERADOR DE RELATÓRIOS ====================
+
+class ReportGenerator:
+    """Classe para geração de relatórios PDF"""
+    
+    def __init__(self, reports_dir: str):
+        self.reports_dir = reports_dir
+    
+    def generate_pdf_report(self, operation: Operation, images: Dict[str, str]) -> str:
+        """Gera relatório PDF da operação"""
+        html_content = self._create_html_content(operation, images)
+        
+        filename = f"report_{operation.symbol}_{int(time.time())}.pdf"
+        path = os.path.join(self.reports_dir, filename)
+        
+        HTML(string=html_content).write_pdf(path)
+        
+        return path
+    
+    def _create_html_content(self, operation: Operation, images: Dict[str, str]) -> str:
+        """Cria conteúdo HTML para o relatório"""
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Relatório - {operation.symbol}</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                .header {{ background: #2c3e50; color: white; padding: 20px; border-radius: 8px; }}
+                .stats {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px 0; }}
+                .stat-card {{ border: 1px solid #ddd; padding: 15px; border-radius: 5px; text-align: center; }}
+                .stat-card h3 {{ margin-top: 0; color: #2c3e50; }}
+                .stat-value {{ font-size: 24px; font-weight: bold; margin: 10px 0; }}
+                .chart-container {{ margin: 20px 0; text-align: center; }}
+                .chart-container img {{ max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 5px; }}
+                .observations {{ background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+                .status-badge {{
+                    display: inline-block;
+                    padding: 5px 10px;
+                    border-radius: 20px;
+                    font-weight: bold;
+                    margin-left: 10px;
+                }}
+                .status-aberta {{ background: #ffc107; color: #000; }}
+                .status-alvo {{ background: #28a745; color: white; }}
+                .status-stop {{ background: #dc3545; color: white; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>📊 Relatório de Operação</h1>
+                <p>
+                    <strong>Símbolo:</strong> {operation.symbol} | 
+                    <strong>Tipo:</strong> {operation.tipo} | 
+                    <strong>Status:</strong> 
+                    <span class="status-badge status-{operation.status.lower().replace(' ', '-')}">
+                        {operation.status}
+                    </span>
+                </p>
+                <p><strong>Data:</strong> {datetime.now(BR_TZ).strftime('%d/%m/%Y %H:%M')}</p>
+            </div>
+            
+            <div class="stats">
+                <div class="stat-card">
+                    <h3>🎯 Entrada</h3>
+                    <div class="stat-value">R$ {operation.entrada:.2f}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>🛑 Stop</h3>
+                    <div class="stat-value">R$ {operation.stop:.2f}</div>
+                    <div>Pontos: {operation.pontos_stop:.2f}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>🚀 Alvo</h3>
+                    <div class="stat-value">R$ {operation.alvo:.2f}</div>
+                    <div>Pontos: {operation.pontos_alvo:.2f}</div>
+                </div>
+            </div>
+            
+            <div class="stats">
+                <div class="stat-card">
+                    <h3>📈 Quantidade</h3>
+                    <div class="stat-value">{operation.quantidade}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>💰 Preço Atual</h3>
+                    <div class="stat-value">R$ {operation.preco_atual:.2f}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>⚖️ Risco/Retorno</h3>
+                    <div class="stat-value">
+                        {operation.pontos_alvo/operation.pontos_stop if operation.pontos_stop > 0 else 0:.2f}:1
+                    </div>
+                </div>
+            </div>
+            
+            <div class="charts">
+                <h2>📈 Análise Técnica</h2>
+                {"".join([f'''
+                <div class="chart-container">
+                    <h3>{tf.upper()} - {operation.symbol}</h3>
+                    <img src="{img}">
+                </div>
+                ''' for tf, img in images.items()])}
+            </div>
+            
+            <div class="observations">
+                <h2>📝 Observações</h2>
+                <p>{operation.observacoes or 'Sem observações registradas.'}</p>
+            </div>
+            
+            <footer style="margin-top: 40px; text-align: center; color: #6c757d; font-size: 12px;">
+                <p>Relatório gerado automaticamente pelo Sistema de Trading</p>
+                <p>Data: {datetime.now(BR_TZ).strftime('%d/%m/%Y %H:%M:%S')}</p>
+            </footer>
+        </body>
+        </html>
+        """
+
+# ==================== APLICAÇÃO FLASK ====================
+
+# Inicialização
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'sua-chave-secreta-aqui'
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# Instâncias globais
+finance_data = FinanceData()
+chart_generator = ChartGenerator()
+database = Database(DB_PATH)
+report_generator = ReportGenerator(REPORTS_DIR)
+realtime_manager = RealTimeManager(socketio, finance_data)
+
+# Caches
+price_cache = CacheManager(expiry_seconds=30)
+chart_cache = CacheManager(expiry_seconds=15)
+
+# ==================== ROTAS API ====================
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    """Página principal com dashboard"""
+    symbols = ['PETR4', 'VALE3', 'ITUB4', 'BBDC4']
+    stocks = []
+    
+    for sym in symbols:
+        try:
+            info = finance_data.get_ticker_info(sym)
+            if info:
+                stocks.append(asdict(info))
+        except Exception as e:
+            logger.error(f"Erro ao buscar {sym}: {e}")
+    
+    # Gráfico inicial
+    try:
+        df = finance_data.get_candles('PETR4', '15m', 50)
+        fig = chart_generator.create_plotly_chart(df, 'PETR4 - 15 Minutos')
+        graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+    except Exception as e:
+        logger.error(f"Erro no gráfico inicial: {e}")
+        graphJSON = "{}"
+    
+    return render_template('index.html', 
+                         stocks=stocks[:4], 
+                         graphJSON=graphJSON,
+                         timeframe='15m')
 
-def open_browser():
-    time.sleep(1)
-    webbrowser.open('http://127.0.0.1:5000')
+@app.route('/api/quote/<symbol>')
+def api_quote(symbol):
+    """API para cotação em tempo real"""
+    try:
+        info = finance_data.get_ticker_info(symbol)
+        return jsonify(asdict(info))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/chart/<symbol>/<interval>')
+def api_chart(symbol, interval):
+    """API para dados do gráfico"""
+    try:
+        df = finance_data.get_candles(symbol, interval, 100)
+        fig = chart_generator.create_plotly_chart(df, f'{symbol} - {interval}')
+        
+        # Prepara candles
+        candles = []
+        for _, row in df.iterrows():
+            candles.append({
+                'time': row['time'].isoformat() if hasattr(row['time'], 'isoformat') else str(row['time']),
+                'time_str': row['time_str'],
+                'open': float(row['open']),
+                'high': float(row['high']),
+                'low': float(row['low']),
+                'close': float(row['close']),
+                'volume': int(row['volume'])
+            })
+        
+        return jsonify({
+            'symbol': symbol,
+            'interval': interval,
+            'candles': candles[-100:],
+            'indicators': {
+                'sma_9': float(df['SMA_9'].iloc[-1]) if 'SMA_9' in df.columns else None,
+                'sma_21': float(df['SMA_21'].iloc[-1]) if 'SMA_21' in df.columns else None,
+                'rsi': float(df['RSI'].iloc[-1]) if 'RSI' in df.columns else None,
+            },
+            'chart_data': json.loads(json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder))
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/operacao', methods=['POST'])
+def api_operation():
+    """Registra nova operação"""
+    try:
+        data = request.get_json()
+        
+        # Busca preço atual
+        symbol = data.get('ativo') or data.get('symbol')
+        info = finance_data.get_ticker_info(symbol)
+        
+        if not info:
+            return jsonify({'error': 'Símbolo não encontrado'}), 400
+        
+        # Cria operação
+        operation = Operation(
+            symbol=symbol,
+            tipo=data.get('tipo', 'COMPRA'),
+            entrada=float(data['entrada']),
+            stop=float(data['stop']),
+            alvo=float(data['alvo']),
+            quantidade=int(data.get('quantidade', 100)),
+            observacoes=data.get('observacoes', ''),
+            preco_atual=info.price,
+            timeframe=data.get('timeframe', '15m')
+        )
+        
+        # Calcula status
+        if operation.preco_atual >= operation.alvo:
+            operation.status = 'ALVO ATINGIDO'
+        elif operation.preco_atual <= operation.stop:
+            operation.status = 'STOP ATINGIDO'
+        
+        # Gera gráficos para PDF
+        images = {}
+        for tf in ['15m', '1h', '1d']:
+            df = finance_data.get_candles(operation.symbol, tf, 80)
+            img = chart_generator.generate_chart_image(df, f"{operation.symbol} - {tf}")
+            if img:
+                images[tf] = img
+        
+        # Gera PDF
+        pdf_path = report_generator.generate_pdf_report(operation, images)
+        
+        # Salva no banco
+        indicators = {
+            'sma_9': float(df['SMA_9'].iloc[-1]) if 'SMA_9' in df.columns else None,
+            'sma_21': float(df['SMA_21'].iloc[-1]) if 'SMA_21' in df.columns else None,
+            'rsi': float(df['RSI'].iloc[-1]) if 'RSI' in df.columns else None,
+        }
+        
+        op_id = database.insert_operation(operation, pdf_path, indicators)
+        
+        return jsonify({
+            'id': op_id,
+            'status': 'success',
+            'pdf_url': f'/reports/{os.path.basename(pdf_path)}',
+            'operation': asdict(operation)
+        })
+        
+    except Exception as e:
+        logger.error(f"Erro ao registrar operação: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/search/<query>')
+def api_search(query):
+    """Busca símbolos"""
+    results = []
+    
+    for symbol, name in finance_data.tickers.items():
+        if query.upper() in symbol or query.upper() in name.upper():
+            results.append({
+                'symbol': symbol.replace('.SA', ''),
+                'name': name,
+                'type': 'Ação' if '.SA' in symbol else 'ETF'
+            })
+    
+    return jsonify(results[:10])
+
+@app.route('/api/history')
+def api_history():
+    """Retorna histórico de operações"""
+    try:
+        operations = database.get_operations(50)
+        return jsonify(operations)
+    except Exception as e:
+        logger.error(f"Erro ao buscar histórico: {e}")
+        return jsonify([])
+
+@app.route('/reports/<filename>')
+def serve_report(filename):
+    """Serve arquivos de relatório"""
+    return send_from_directory(REPORTS_DIR, filename)
+
+# ==================== WEBSOCKET HANDLERS ====================
+
+@socketio.on('subscribe')
+def handle_subscribe(data):
+    """Cliente se inscreve para atualizações"""
+    symbol = data.get('symbol')
+    
+    if symbol:
+        realtime_manager.subscribe(symbol)
+        join_room(f"symbol_{symbol}")
+        
+        # Envia dados atuais
+        info = finance_data.get_ticker_info(symbol)
+        if info:
+            emit('price_update', {
+                'symbol': symbol,
+                'data': asdict(info)
+            })
+        
+        emit('subscription_confirmed', {
+            'symbol': symbol,
+            'message': f'Inscrito em {symbol}'
+        })
+
+@socketio.on('unsubscribe')
+def handle_unsubscribe(data):
+    """Cliente cancela inscrição"""
+    symbol = data.get('symbol')
+    
+    if symbol:
+        realtime_manager.unsubscribe(symbol)
+        leave_room(f"symbol_{symbol}")
+        
+        emit('unsubscription_confirmed', {
+            'symbol': symbol,
+            'message': f'Inscrição cancelada para {symbol}'
+        })
+
+@socketio.on('request_chart')
+def handle_chart_request(data):
+    """Envia dados do gráfico via WebSocket"""
+    try:
+        symbol = data.get('symbol')
+        interval = data.get('interval', '15m')
+        
+        df = finance_data.get_candles(symbol, interval, 100)
+        fig = chart_generator.create_plotly_chart(df, f'{symbol} - {interval}')
+        
+        emit('chart_data', {
+            'symbol': symbol,
+            'interval': interval,
+            'chart': json.loads(json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder))
+        })
+        
+    except Exception as e:
+        emit('chart_error', {'error': str(e)})
+
+# ==================== TAREFAS EM BACKGROUND ====================
+
+def start_background_tasks():
+    """Inicia tarefas em background"""
+    logger.info("🚀 Iniciando sistema de dados financeiros...")
+    
+    # Thread para atualizações em tempo real
+    update_thread = threading.Thread(target=realtime_manager.start_updates, daemon=True)
+    update_thread.start()
+    
+    # Thread para limpeza de cache
+    def cache_cleaner():
+        while True:
+            time.sleep(300)
+            price_cache.clear_expired()
+            chart_cache.clear_expired()
+            logger.debug("🧹 Cache limpo")
+    
+    cleaner_thread = threading.Thread(target=cache_cleaner, daemon=True)
+    cleaner_thread.start()
+
+# ==================== INICIALIZAÇÃO ====================
 
 if __name__ == '__main__':
-    threading.Thread(target=open_browser).start()
-    app.run(debug=False)
+    # Inicia tarefas em background
+    start_background_tasks()
+    
+    # Abre navegador (opcional)
+    threading.Thread(
+        target=lambda: (time.sleep(3), webbrowser.open('http://127.0.0.1:5000')),
+        daemon=True
+    ).start()
+    
+    logger.info("✅ Servidor iniciado em http://127.0.0.1:5000")
+    logger.info("📊 Sistema de dados financeiros ativo")
+    
+    # Inicia servidor
+    socketio.run(app, 
+                debug=True, 
+                port=5000, 
+                allow_unsafe_werkzeug=True,
+                log_output=False)

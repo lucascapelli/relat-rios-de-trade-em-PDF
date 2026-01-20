@@ -4,148 +4,54 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Relatórios de Trade</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        
-        .container {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            padding: 40px;
-            max-width: 600px;
-            width: 100%;
-        }
-        
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        .header h1 {
-            color: #333;
-            font-size: 28px;
-            margin-bottom: 10px;
-        }
-        
-        .header p {
-            color: #666;
-            font-size: 14px;
-        }
-        
-        .form-group {
+        .realtime-controls {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
             margin-bottom: 20px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 8px;
-            color: #333;
-            font-weight: 500;
-            font-size: 14px;
-        }
-        
-        input, select, textarea {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 14px;
-            font-family: inherit;
-            transition: border-color 0.3s;
-        }
-        
-        input:focus, select:focus, textarea:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-        
-        .form-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }
-        
-        .button-group {
-            display: flex;
-            gap: 12px;
-            margin-top: 30px;
-        }
-        
-        button {
-            flex: 1;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
-        }
-        
-        .btn-secondary {
-            background: #f0f0f0;
-            color: #333;
-        }
-        
-        .btn-secondary:hover {
-            background: #e0e0e0;
-        }
-        
-        .nav-tabs {
             display: flex;
             gap: 10px;
-            margin-bottom: 30px;
-            border-bottom: 2px solid #f0f0f0;
+            flex-wrap: wrap;
+            align-items: center;
         }
         
-        .nav-tab {
-            padding: 12px 20px;
-            background: none;
+        .realtime-controls select, .realtime-controls button {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .realtime-controls button {
+            background: #3498db;
+            color: white;
             border: none;
             cursor: pointer;
-            font-weight: 600;
-            color: #999;
-            border-bottom: 3px solid transparent;
-            transition: all 0.3s;
-            margin-bottom: -2px;
         }
         
-        .nav-tab.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
+        .realtime-controls button:hover {
+            background: #2980b9;
         }
         
-        .tab-content {
-            display: none;
+        .status-indicator {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
         }
         
-        .tab-content.active {
-            display: block;
+        .status-connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-disconnected {
+            background: #f8d7da;
+            color: #721c24;
         }
     </style>
 </head>
@@ -153,17 +59,18 @@
     <div class="container">
         <div class="header">
             <h1>📊 Relatório de Trade</h1>
-            <p>Preencha as informações da operação</p>
+            <p>Preencha as informações da operação - Gráficos em Tempo Real</p>
         </div>
         
         <div class="nav-tabs">
-            <button class="nav-tab active" onclick="showTab('form')">Formulário</button>
-            <button class="nav-tab" onclick="showTab('historico')">Histórico</button>
+            <button class="nav-tab active" onclick="showTab('form', event)">Formulário</button>
+            <button class="nav-tab" onclick="showTab('graficos', event)">Gráficos em Tempo Real</button>
+            <button class="nav-tab" onclick="showTab('historico', event)">Histórico</button>
         </div>
         
         <!-- ABA: FORMULÁRIO -->
         <div id="form" class="tab-content active">
-            <form onsubmit="enviarDados(event)">
+            <form id="operacaoForm">
                 <div class="form-row">
                     <div class="form-group">
                         <label for="ativo">Ativo</label>
@@ -211,44 +118,95 @@
                     <button type="reset" class="btn-secondary">Limpar</button>
                 </div>
             </form>
+
+            <h2>Operações Fictícias</h2>
+            <table border="1">
+                <tr>
+                    <th>Ativo</th><th>Entrada</th><th>Stop</th><th>Alvo</th><th>Preço Atual</th><th>Status</th>
+                </tr>
+                {% for op in ops %}
+                <tr>
+                    <td>{{ op.ativo }}</td>
+                    <td>{{ op.entrada }}</td>
+                    <td>{{ op.stop }}</td>
+                    <td>{{ op.alvo }}</td>
+                    <td>{{ op.preco_atual }}</td>
+                    <td>{{ op.status }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+
+            <h2>Gráfico Candle</h2>
+            <div id="graph" data-graph='{{ graphJSON | safe }}'></div>
+        </div>
+
+        <!-- ABA: GRÁFICOS EM TEMPO REAL -->
+        <div id="graficos" class="tab-content">
+            <h2>Monitoramento em Tempo Real</h2>
+            
+            <div class="realtime-controls">
+                <label for="realtimeAsset">Ativo:</label>
+                <select id="realtimeAsset">
+                    <option value="PETR4.SA">PETR4.SA</option>
+                    <option value="VALE3.SA">VALE3.SA</option>
+                    <option value="ITUB4.SA">ITUB4.SA</option>
+                    <option value="BBDC4.SA">BBDC4.SA</option>
+                    <option value="ABEV3.SA">ABEV3.SA</option>
+                </select>
+                
+                <label for="realtimeTimeframe">Timeframe:</label>
+                <select id="realtimeTimeframe">
+                    <option value="1min">1 Minuto</option>
+                    <option value="5min">5 Minutos</option>
+                    <option value="15min" selected>15 Minutos</option>
+                    <option value="30min">30 Minutos</option>
+                    <option value="60min">1 Hora</option>
+                    <option value="daily">Diário</option>
+                </select>
+                
+                <button id="realtimeRefreshBtn">Atualizar</button>
+                <div id="connectionStatus" class="status-indicator status-disconnected">Desconectado</div>
+            </div>
+            
+            <div id="realtimeChart" style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px;"></div>
+            
+            <div id="priceStats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;"></div>
         </div>
         
         <!-- ABA: HISTÓRICO -->
         <div id="historico" class="tab-content">
-            <div style="text-align: center; padding: 40px; color: #999;">
-                <p>Nenhum relatório gerado ainda</p>
-            </div>
+            <h2>Histórico de Relatórios</h2>
+            <table border="1">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Ativo</th>
+                        <th>Data</th>
+                        <th>Ação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="4" style="text-align: center; padding: 20px; color: #999;">Carregando...</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
     
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='realtime.js') }}"></script>
+    
     <script>
-        function showTab(tabName) {
-            const tabs = document.querySelectorAll('.tab-content');
-            const navTabs = document.querySelectorAll('.nav-tab');
-            
-            tabs.forEach(tab => tab.classList.remove('active'));
-            navTabs.forEach(tab => tab.classList.remove('active'));
-            
-            document.getElementById(tabName).classList.add('active');
-            event.target.classList.add('active');
-        }
-        
-        function enviarDados(event) {
-            event.preventDefault();
-            
-            const dados = {
-                ativo: document.getElementById('ativo').value,
-                tipo: document.getElementById('tipo').value,
-                entrada: parseFloat(document.getElementById('entrada').value),
-                stop: parseFloat(document.getElementById('stop').value),
-                alvo: parseFloat(document.getElementById('alvo').value),
-                quantidade: parseInt(document.getElementById('quantidade').value),
-                observacoes: document.getElementById('observacoes').value
-            };
-            
-            console.log('Dados enviados:', dados);
-            alert('Relatório gerado com sucesso!\n\nDados: ' + JSON.stringify(dados, null, 2));
-        }
+    // Gráfico inicial
+    var graphData = document.getElementById('graph').getAttribute('data-graph');
+    var graphs = JSON.parse(graphData);
+    var config = {
+        responsive: true,
+        displayModeBar: true,
+        displaylogo: false,
+        modeBarButtonsToRemove: ['sendDataToCloud']
+    };
+    Plotly.newPlot('graph', graphs.data, graphs.layout, config);
     </script>
+
 </body>
 </html>
