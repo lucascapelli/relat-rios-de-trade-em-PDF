@@ -22,6 +22,7 @@ import mplfinance as mpf  # Gráficos financeiros com matplotlib
 import matplotlib  # Gráficos estáticos
 matplotlib.use('Agg')  # Usa backend não-interativo (para servidor)
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 # Bibliotecas de visualização interativa
 import plotly.graph_objs as go  # Gráficos interativos
@@ -50,6 +51,10 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)  # Cria logger principal
+
+PLACEHOLDER_IMAGE_DATA_URL = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/lbexOwAAAABJRU5ErkJggg=="
+)
 
 # ==================== CONSTANTES E CONFIGURAÇÕES ====================
 # Define caminhos e configurações fixas da aplicação
@@ -379,6 +384,7 @@ class FinanceData:
         interval_map = {
             '1m': ('1m', '1d'), '5m': ('5m', '5d'), '15m': ('15m', '5d'),
             '30m': ('30m', '10d'), '1h': ('60m', '30d'), '1d': ('1d', '3mo'),
+            '1w': ('1wk', '2y'),
             '15min': ('15m', '5d'), '60min': ('60m', '30d'), 'daily': ('1d', '3mo')
         }
         
@@ -475,55 +481,47 @@ class FinanceData:
 
     def _generate_fallback_data(self, symbol: str, interval: str, periods: int, reason: str = 'fallback') -> pd.DataFrame:
         """Gera dados de fallback realistas quando API falha"""
-        # Configurações por intervalo (volatilidade e frequência)
         config = {
             '1m': {'freq': '1min', 'vol': 0.002},
             '5m': {'freq': '5min', 'vol': 0.005},
             '15m': {'freq': '15min', 'vol': 0.008},
             '30m': {'freq': '30min', 'vol': 0.012},
             '1h': {'freq': '1h', 'vol': 0.015},
-            '1d': {'freq': '1D', 'vol': 0.02}
+            '1d': {'freq': '1D', 'vol': 0.02},
+            '1w': {'freq': '1W', 'vol': 0.03}
         }
-        
-        cfg = config.get(interval, config['15m'])  # Usa 15m como padrão
-        
-        # Gera timestamps
+
+        cfg = config.get(interval, config['15m'])
         dates = pd.date_range(end=datetime.now(), periods=periods, freq=cfg['freq'])
-        
-        # Gera preços com tendência e ruído
-        base_price = 100 + (hash(symbol) % 100)  # Preço base único por símbolo
-        trend_direction = 1 if (hash(symbol) % 2) == 0 else -1  # Tendência aleatória
-        trend = np.linspace(0, trend_direction * cfg['vol'] * 20, periods)  # Tendência linear
-        noise = np.random.normal(0, cfg['vol'], periods)  # Ruído aleatório
-        close_prices = base_price * (1 + trend + noise.cumsum())  # Preços de fechamento
-        
-        # Gera dados OHLCV (Open, High, Low, Close, Volume)
+
+        base_price = 100 + (hash(symbol) % 100)
+        trend_direction = 1 if (hash(symbol) % 2) == 0 else -1
+        trend = np.linspace(0, trend_direction * cfg['vol'] * 20, periods)
+        noise = np.random.normal(0, cfg['vol'], periods)
+        close_prices = base_price * (1 + trend + noise.cumsum())
+
         data = []
         for i in range(periods):
             open_price = close_prices[i-1] if i > 0 else close_prices[i] * (1 + np.random.uniform(-0.005, 0.005))
             close_price_val = close_prices[i]
-            
-            # Determina se candle é de alta ou baixa
+
             is_bullish = close_price_val >= open_price
-            body_range = abs(close_price_val - open_price)  # Tamanho do corpo
-            wick_range = body_range + base_price * cfg['vol'] * 2  # Tamanho das sombras
-            
-            # Gera high e low baseado na direção
-            if is_bullish:  # Candle de alta (verde)
-                low = open_price - np.random.uniform(0, wick_range * 0.3)  # Sombra inferior menor
-                high = close_price_val + np.random.uniform(0, wick_range * 0.7)  # Sombra superior maior
-            else:  # Candle de baixa (vermelho)
+            body_range = abs(close_price_val - open_price)
+            wick_range = body_range + base_price * cfg['vol'] * 2
+
+            if is_bullish:
+                low = open_price - np.random.uniform(0, wick_range * 0.3)
+                high = close_price_val + np.random.uniform(0, wick_range * 0.7)
+            else:
                 low = close_price_val - np.random.uniform(0, wick_range * 0.7)
                 high = open_price + np.random.uniform(0, wick_range * 0.3)
-            
-            # Garante validade dos preços
+
             high = max(high, low + 0.01)
             open_price = max(low, min(high, open_price))
             close_price_val = max(low, min(high, close_price_val))
-            
-            # Volume proporcional à volatilidade
-            volume = np.random.randint(10000, 1000000) * (1 + body_range/base_price)
-            
+
+            volume = np.random.randint(10000, 1000000) * (1 + body_range / base_price)
+
             data.append({
                 'time': dates[i],
                 'time_str': dates[i].strftime('%Y-%m-%d %H:%M:%S'),
@@ -533,13 +531,13 @@ class FinanceData:
                 'close': round(close_price_val, 2),
                 'volume': int(volume)
             })
-        
+
         df = pd.DataFrame(data)
-        df = self.indicators.calculate_all(df)  # Adiciona indicadores
+        df = self.indicators.calculate_all(df)
         df.attrs['source'] = reason
         self._log_dataset_snapshot(df, symbol, interval, source=reason)
         logger.info(f"Fallback gerado para {symbol} ({interval}) com razão '{reason}': {len(df)} candles")
-        
+
         return df
 
 # ==================== GERADOR DE GRÁFICOS ====================
@@ -781,14 +779,30 @@ class ChartGenerator:
         return fig
     
     @staticmethod
-    def generate_chart_image(df: pd.DataFrame, title: str = "", 
-                            width: int = 800, height: int = 400) -> str:
-        """Gera imagem estática do gráfico para PDF (base64)"""
+    def generate_chart_image(
+        df: pd.DataFrame,
+        title: str = "",
+        width: int = 800,
+        height: int = 400,
+        operation: Optional[Operation] = None
+    ) -> str:
+        """Gera imagem estática do gráfico para PDF (base64).
+
+        Quando uma operação é informada, adiciona níveis horizontais de entrada,
+        alvo e stop ao gráfico para contextualizar a análise registrada no PDF.
+        """
         try:
             if df is None or df.empty:
                 return ""
             
             df_plot = df.copy()
+
+            try:
+                enhanced_image = ChartGenerator._generate_simple_chart(df_plot, title, operation, width, height)
+                if enhanced_image:
+                    return enhanced_image
+            except Exception as enhanced_error:
+                logger.warning(f"Falha no renderizador aprimorado do gráfico: {enhanced_error}")
             
             # Prepara DataFrame para mplfinance
             if 'time' in df_plot.columns:
@@ -814,7 +828,15 @@ class ChartGenerator:
                 return ""
             
             # Remove NaN
-            df_plot = df_plot[required_cols + (['Volume'] if 'Volume' in df_plot.columns else [])].dropna()
+            columns = list(required_cols)
+            if 'Volume' in df_plot.columns:
+                columns.append('Volume')
+
+            df_plot = df_plot[columns].copy()
+            df_plot = df_plot.dropna(subset=required_cols)
+
+            if 'Volume' in df_plot.columns:
+                df_plot.loc[:, 'Volume'] = df_plot['Volume'].fillna(0)
             
             if len(df_plot) < 2:
                 return ""
@@ -845,7 +867,7 @@ class ChartGenerator:
                         addplot.append(mpf.make_addplot(sma_aligned, color=color, width=1.2))
             
             # Cria figura com mplfinance
-            fig, _ = mpf.plot(
+            fig, axes = mpf.plot(
                 df_plot,
                 type='candle',
                 style=s,
@@ -857,6 +879,60 @@ class ChartGenerator:
                 returnfig=True,
                 warn_too_much_data=1000
             )
+
+            if operation is not None and axes:
+                price_ax = None
+
+                if isinstance(axes, (list, tuple)) and len(axes) > 0:
+                    price_ax = axes[0]
+                elif hasattr(axes, '__len__') and len(axes) > 0:
+                    try:
+                        price_ax = axes[0]
+                    except Exception:
+                        price_ax = None
+                elif isinstance(axes, dict):
+                    price_ax = axes.get('main') or axes.get('price') or axes.get('volume')
+                else:
+                    price_ax = axes
+
+                if price_ax is None:
+                    logger.warning("Não foi possível identificar o eixo principal para anotar níveis da operação")
+
+                price_levels = [
+                    ('Entrada', float(operation.entrada), '#2980b9'),
+                    ('Alvo', float(operation.alvo), '#2ecc71'),
+                    ('Stop', float(operation.stop), '#e74c3c')
+                ]
+
+                if price_ax is not None:
+                    try:
+                        current_ylim = price_ax.get_ylim()
+                        min_level = min(level for _, level, _ in price_levels if level is not None)
+                        max_level = max(level for _, level, _ in price_levels if level is not None)
+                        lower_bound = min(current_ylim[0], min_level)
+                        upper_bound = max(current_ylim[1], max_level)
+                        price_ax.set_ylim(lower_bound, upper_bound)
+
+                        x_position = df_plot.index[-1]
+                        for label, level, color in price_levels:
+                            price_ax.axhline(y=level, color=color, linestyle='--', linewidth=1.0, alpha=0.9)
+                            price_ax.text(
+                                x_position,
+                                level,
+                                f" {label}: R$ {level:.2f}",
+                                color=color,
+                                fontsize=8,
+                                va='center',
+                                ha='left',
+                                bbox={
+                                    'facecolor': 'white',
+                                    'edgecolor': color,
+                                    'alpha': 0.65,
+                                    'boxstyle': 'round,pad=0.2'
+                                }
+                            )
+                    except Exception as axis_error:
+                        logger.warning(f"Falha ao anotar níveis da operação no gráfico: {axis_error}")
             
             # Salva em buffer de memória como PNG
             buf = io.BytesIO()
@@ -870,7 +946,165 @@ class ChartGenerator:
             
         except Exception as e:
             logger.error(f"Erro ao gerar imagem: {e}")
+            try:
+                return ChartGenerator._generate_simple_chart(df, title, operation, width, height)
+            except Exception as fallback_error:
+                logger.error(f"Erro no fallback simples do gráfico: {fallback_error}")
+                return ""
+
+    @staticmethod
+    def _generate_simple_chart(
+        df: pd.DataFrame,
+        title: str,
+        operation: Optional[Operation] = None,
+        width: int = 800,
+        height: int = 400
+    ) -> str:
+        """Renderiza gráfico estático completo (candles + volume + RSI) para o PDF."""
+        if df is None or df.empty or 'close' not in df.columns:
             return ""
+
+        df_plot = df.copy()
+        if 'time' in df_plot.columns:
+            df_plot['time'] = pd.to_datetime(df_plot['time'], errors='coerce')
+        elif 'time_str' in df_plot.columns:
+            df_plot['time'] = pd.to_datetime(df_plot['time_str'], errors='coerce')
+        else:
+            df_plot['time'] = pd.to_datetime(df_plot.index, errors='coerce')
+
+        numeric_cols = ['open', 'high', 'low', 'close', 'volume']
+        for col in numeric_cols:
+            if col in df_plot.columns:
+                df_plot[col] = pd.to_numeric(df_plot[col], errors='coerce')
+
+        df_plot = df_plot.dropna(subset=['time', 'open', 'high', 'low', 'close'])
+        if df_plot.empty:
+            return ""
+
+        times = df_plot['time']
+        opens = df_plot['open']
+        highs = df_plot['high']
+        lows = df_plot['low']
+        closes = df_plot['close']
+        volumes = df_plot.get('volume', pd.Series(index=df_plot.index, data=0)).fillna(0)
+        rsi_series = pd.to_numeric(df_plot.get('RSI'), errors='coerce') if 'RSI' in df_plot.columns else None
+
+        if len(times) < 2:
+            return ""
+
+        fig_width = max(width / 110, 7)
+        fig_height = max(height / 130, 5.2)
+
+        fig, axes = plt.subplots(
+            nrows=3,
+            sharex=True,
+            gridspec_kw={'height_ratios': [4, 1.6, 1]},
+            figsize=(fig_width, fig_height),
+            dpi=140
+        )
+        ax_price, ax_volume, ax_rsi = axes
+
+        date_vals = mdates.date2num(times)
+        bar_width = (date_vals[1] - date_vals[0]) * 0.6 if len(date_vals) > 1 else 0.6
+        colors = ['#26a69a' if close >= open_ else '#ef5350' for close, open_ in zip(closes, opens)]
+
+        ax_price.set_facecolor('#ffffff')
+        ax_price.vlines(date_vals, lows, highs, color=colors, linewidth=1)
+        bodies_bottom = np.minimum(opens, closes)
+        bodies_height = np.maximum(np.abs(closes - opens), 0.001)
+        ax_price.bar(date_vals, bodies_height, width=bar_width, bottom=bodies_bottom, color=colors, align='center', alpha=0.9, linewidth=0)
+
+        if 'SMA_9' in df_plot.columns:
+            ax_price.plot(date_vals, df_plot['SMA_9'], color='#1E88E5', linewidth=1.2, label='SMA 9')
+        if 'SMA_21' in df_plot.columns:
+            ax_price.plot(date_vals, df_plot['SMA_21'], color='#FB8C00', linewidth=1.2, label='SMA 21')
+        if {'BB_upper', 'BB_lower'}.issubset(df_plot.columns):
+            ax_price.fill_between(
+                date_vals,
+                df_plot['BB_upper'],
+                df_plot['BB_lower'],
+                color='#90CAF9',
+                alpha=0.12,
+                label='Bandas de Bollinger'
+            )
+
+        if operation is not None:
+            level_specs = [
+                ('Entrada', float(operation.entrada), '#1565C0'),
+                ('Alvo', float(operation.alvo), '#2E7D32'),
+                ('Stop', float(operation.stop), '#C62828')
+            ]
+            for label, level, color in level_specs:
+                ax_price.axhline(level, color=color, linestyle='--', linewidth=1.0, alpha=0.85)
+                ax_price.text(
+                    date_vals[-1],
+                    level,
+                    f" {label}: R$ {level:.2f}",
+                    color=color,
+                    fontsize=8,
+                    va='center',
+                    ha='left',
+                    bbox={'facecolor': 'white', 'edgecolor': color, 'alpha': 0.7, 'pad': 0.2}
+                )
+
+        ax_price.set_title(title)
+        ax_price.set_ylabel('Preço (R$)')
+        ax_price.grid(True, linestyle='--', alpha=0.2)
+        handles, labels = ax_price.get_legend_handles_labels()
+        if handles:
+            ax_price.legend(handles, labels, loc='upper left', fontsize=8)
+
+        ax_volume.set_facecolor('#ffffff')
+        ax_volume.bar(date_vals, volumes, width=bar_width, color=colors, alpha=0.6)
+        if 'Volume_SMA' in df_plot.columns:
+            volume_sma = pd.to_numeric(df_plot['Volume_SMA'], errors='coerce').reindex(df_plot.index)
+            if volume_sma.notna().sum() > 3:
+                ax_volume.plot(date_vals, volume_sma, color='#7E57C2', linewidth=1.0, label='Volume SMA 20')
+        ax_volume.set_ylabel('Volume')
+        ax_volume.grid(True, linestyle='--', alpha=0.2)
+        vol_handles, vol_labels = ax_volume.get_legend_handles_labels()
+        if vol_handles:
+            ax_volume.legend(vol_handles, vol_labels, loc='upper left', fontsize=7)
+
+        if rsi_series is not None and rsi_series.notna().sum() > 5:
+            rsi_clean = rsi_series.reindex(df_plot.index).fillna(method='ffill').fillna(method='bfill')
+            ax_rsi.set_facecolor('#ffffff')
+            ax_rsi.plot(date_vals, rsi_clean, color='#8E24AA', linewidth=1.3, label='RSI (14)')
+            ax_rsi.fill_between(date_vals, 30, 70, color='#CE93D8', alpha=0.15)
+            ax_rsi.axhline(70, color='#B71C1C', linestyle='--', linewidth=0.8, alpha=0.8)
+            ax_rsi.axhline(30, color='#1B5E20', linestyle='--', linewidth=0.8, alpha=0.8)
+            last_rsi = rsi_clean.iloc[-1]
+            ax_rsi.text(
+                date_vals[-1],
+                last_rsi,
+                f" RSI: {last_rsi:.1f}",
+                color='#4527A0',
+                fontsize=8,
+                va='center',
+                ha='left',
+                bbox={'facecolor': 'white', 'edgecolor': '#8E24AA', 'alpha': 0.7, 'pad': 0.2}
+            )
+            ax_rsi.set_ylim(0, 100)
+            ax_rsi.set_ylabel('RSI')
+            ax_rsi.grid(True, linestyle='--', alpha=0.2)
+            rsi_handles, rsi_labels = ax_rsi.get_legend_handles_labels()
+            if rsi_handles:
+                ax_rsi.legend(rsi_handles, rsi_labels, loc='upper left', fontsize=7)
+        else:
+            ax_rsi.set_axis_off()
+
+        ax_volume.xaxis_date()
+        ax_volume.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m %H:%M'))
+        fig.autofmt_xdate(rotation=0)
+
+        plt.tight_layout()
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', facecolor='white', bbox_inches='tight')
+        plt.close(fig)
+        buf.seek(0)
+        b64 = base64.b64encode(buf.read()).decode('utf-8')
+        return f"data:image/png;base64,{b64}"
 
 # ==================== GERENCIADOR DE TEMPO REAL ====================
 
@@ -1060,9 +1294,9 @@ class ReportGenerator:
     def __init__(self, reports_dir: str):
         self.reports_dir = reports_dir
     
-    def generate_pdf_report(self, operation: Operation, images: Dict[str, str]) -> str:
-        """Gera relatório PDF da operação com gráficos"""
-        html_content = self._create_html_content(operation, images)
+    def generate_pdf_report(self, operation: Operation, charts: List[Dict[str, Any]]) -> str:
+        """Gera relatório PDF da operação com os gráficos da análise técnica."""
+        html_content = self._create_html_content(operation, charts)
         
         # Nome único para o arquivo
         filename = f"report_{operation.symbol}_{int(time.time())}.pdf"
@@ -1073,8 +1307,111 @@ class ReportGenerator:
         
         return path
     
-    def _create_html_content(self, operation: Operation, images: Dict[str, str]) -> str:
-        """Cria conteúdo HTML para o relatório"""
+    def _create_html_content(self, operation: Operation, charts: List[Dict[str, Any]]) -> str:
+        """Cria conteúdo HTML para o relatório com gráficos analisados."""
+        def normalize_tf(tf: Optional[str]) -> str:
+            if not tf:
+                return ''
+            tf_norm = tf.lower().strip()
+            replacements = {
+                '15min': '15m', '15': '15m', '60min': '1h', '60m': '1h', '4h': '4h',
+                'daily': '1d', 'diario': '1d', 'dia': '1d', 'weekly': '1w', 'semanal': '1w'
+            }
+            return replacements.get(tf_norm, tf_norm)
+
+        charts_map: Dict[str, Dict[str, Any]] = {}
+        for chart in charts:
+            tf_key = normalize_tf(chart.get('timeframe'))
+            if tf_key and chart.get('image') and tf_key not in charts_map:
+                charts_map[tf_key] = chart
+
+        def choose_chart(options: List[str]) -> Dict[str, Any]:
+            for opt in options:
+                key = normalize_tf(opt)
+                if key in charts_map:
+                    return charts_map[key]
+            return {}
+
+        def label_for(tf: str) -> str:
+            mapping = {
+                '15m': 'Velas de 15 minutos',
+                '5m': 'Velas de 5 minutos',
+                '1h': 'Velas de 60 minutos',
+                '4h': 'Velas de 4 horas',
+                '1d': 'Velas diárias',
+                '1w': 'Velas semanais'
+            }
+            return mapping.get(tf, f"Timeframe {tf.upper()}")
+
+        def fmt_currency(value: Optional[float]) -> str:
+            if value is None or not isinstance(value, (int, float)):
+                return 'R$ -'
+            return f"R$ {value:.2f}"
+
+        main_chart = choose_chart([operation.timeframe, '15m', '1h', '1d'])
+        intraday_chart = choose_chart(['1h', '60m'])
+        daily_chart = choose_chart(['1d', 'daily'])
+        weekly_chart = choose_chart(['1w', 'weekly'])
+
+        main_tf_key = normalize_tf(main_chart.get('timeframe') if main_chart else operation.timeframe)
+        summary_direction = 'compra' if operation.tipo.upper() == 'COMPRA' else 'venda'
+        summary_text = (
+            f"O ativo {operation.symbol}, após análise técnica, sugere potencial de {summary_direction}. "
+            f"A operação foi planejada com entrada em R$ {operation.entrada:.2f}, alvo em R$ {operation.alvo:.2f} "
+            f"e stop em R$ {operation.stop:.2f}, analisando o comportamento das {label_for(main_tf_key).lower()}."
+        )
+
+        def chart_card(chart_data: Dict[str, Any], title: str) -> str:
+            if not chart_data:
+                return f"""
+                    <div class=\"chart-box empty\">
+                        <div class=\"chart-title\">{title}</div>
+                        <div class=\"chart-placeholder\">Gráfico não disponível</div>
+                    </div>
+                """
+            source_label = (chart_data.get('source') or 'desconhecido').upper()
+            last_close = chart_data.get('last_close')
+            last_time = chart_data.get('last_time') or 'N/D'
+            last_close_text = fmt_currency(last_close)
+            meta_line = f"Fonte: {source_label} | Último: {last_close_text} | Candle: {last_time}"
+            return f"""
+                <div class=\"chart-box\">
+                    <div class=\"chart-title\">{title}</div>
+                    <img src=\"{chart_data.get('image', PLACEHOLDER_IMAGE_DATA_URL)}\" alt=\"{title}\">
+                    <div class=\"chart-meta\">{meta_line}</div>
+                </div>
+            """
+
+        detail_rows = [
+            ('TICKER', operation.symbol),
+            ('TIPO', operation.tipo.upper()),
+            ('ENTRADA', f"R$ {operation.entrada:.2f}"),
+            ('ALVO', f"R$ {operation.alvo:.2f}"),
+            ('STOP LOSS', f"R$ {operation.stop:.2f}"),
+            ('PARCIAL', f"R$ {operation.pontos_alvo:.2f}"),
+            ('STOP LOSS pts', f"{operation.pontos_stop:.2f}"),
+            ('QUANTIDADE', str(operation.quantidade)),
+        ]
+
+        details_table_rows = "".join(
+            f"<tr><td>{label}</td><td>{value}</td></tr>" for label, value in detail_rows
+        )
+
+        vencimento = '-'
+        fechamento = fmt_currency(main_chart.get('last_close') if main_chart else None)
+        ajuste = '-'
+        variacao = 'N/D'
+        minima = fmt_currency(main_chart.get('last_close') if main_chart else None)
+        maxima = '-'
+        volume_financeiro = '-'
+
+        main_chart_html = chart_card(main_chart, label_for(main_tf_key))
+        intraday_chart_html = chart_card(intraday_chart, label_for(normalize_tf(intraday_chart.get('timeframe')) or '1h'))
+        daily_chart_html = chart_card(daily_chart, label_for('1d'))
+        weekly_chart_html = chart_card(weekly_chart, label_for('1w'))
+
+        observations_text = operation.observacoes or 'Sem observações registradas.'
+
         return f"""
         <!DOCTYPE html>
         <html>
@@ -1082,95 +1419,191 @@ class ReportGenerator:
             <meta charset="UTF-8">
             <title>Relatório - {operation.symbol}</title>
             <style>
-                /* Estilos CSS para o relatório */
-                body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                .header {{ background: #2c3e50; color: white; padding: 20px; border-radius: 8px; }}
-                .stats {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px 0; }}
-                .stat-card {{ border: 1px solid #ddd; padding: 15px; border-radius: 5px; text-align: center; }}
-                .stat-card h3 {{ margin-top: 0; color: #2c3e50; }}
-                .stat-value {{ font-size: 24px; font-weight: bold; margin: 10px 0; }}
-                .chart-container {{ margin: 20px 0; text-align: center; }}
-                .chart-container img {{ max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 5px; }}
-                .observations {{ background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }}
-                .status-badge {{
-                    display: inline-block;
-                    padding: 5px 10px;
-                    border-radius: 20px;
-                    font-weight: bold;
-                    margin-left: 10px;
+                body {{
+                    font-family: 'Segoe UI', Arial, sans-serif;
+                    margin: 18px 24px;
+                    background: #f6f8fb;
+                    color: #2e4053;
                 }}
-                .status-aberta {{ background: #ffc107; color: #000; }}  /* Amarelo */
-                .status-alvo {{ background: #28a745; color: white; }}   /* Verde */
-                .status-stop {{ background: #dc3545; color: white; }}   /* Vermelho */
+                .report-wrapper {{
+                    background: white;
+                    border-radius: 12px;
+                    padding: 28px;
+                    box-shadow: 0 12px 35px rgba(15, 35, 95, 0.08);
+                }}
+                .report-header h1 {{
+                    margin: 0;
+                    font-size: 24px;
+                    color: #1d2d50;
+                }}
+                .report-header small {{
+                    color: #718096;
+                }}
+                .summary {{
+                    margin: 18px 0 28px 0;
+                    font-size: 13px;
+                    line-height: 1.6;
+                }}
+                .analysis-grid {{
+                    display: grid;
+                    grid-template-columns: 260px 1fr;
+                    gap: 24px;
+                    align-items: stretch;
+                }}
+                .details-card {{
+                    background: linear-gradient(180deg, #fef5e7 0%, #fdebd0 100%);
+                    border-radius: 12px;
+                    padding: 16px 18px;
+                    border: 1px solid #f5cba7;
+                }}
+                .details-card h2 {{
+                    margin: 0 0 12px 0;
+                    font-size: 16px;
+                    letter-spacing: 0.4px;
+                    color: #b9770e;
+                    text-transform: uppercase;
+                }}
+                .details-card table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 12px;
+                }}
+                .details-card td {{
+                    padding: 6px 4px;
+                    border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+                }}
+                .details-card tr:last-child td {{
+                    border-bottom: none;
+                }}
+                .details-card td:first-child {{
+                    font-weight: 600;
+                    color: #935116;
+                }}
+                .main-chart {{
+                    background: white;
+                    border-radius: 12px;
+                    padding: 12px 16px;
+                    border: 1px solid #e5ebf3;
+                }}
+                .chart-box {{
+                    text-align: center;
+                }}
+                .chart-box img {{
+                    width: 100%;
+                    height: auto;
+                    border-radius: 8px;
+                    border: 1px solid #d7dee8;
+                    background: white;
+                }}
+                .chart-title {{
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: #2c3e50;
+                    margin-bottom: 6px;
+                    text-align: left;
+                }}
+                .chart-meta {{
+                    font-size: 10px;
+                    color: #7b8ba5;
+                    margin-top: 6px;
+                    text-align: left;
+                }}
+                .chart-box.empty {{
+                    border: 1px dashed #cbd5e0;
+                    border-radius: 8px;
+                    padding: 18px;
+                    color: #94a3b8;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                }}
+                .chart-placeholder {{
+                    font-size: 11px;
+                }}
+                .metrics-row {{
+                    display: grid;
+                    grid-template-columns: repeat(7, 1fr);
+                    gap: 8px;
+                    margin: 26px 0;
+                    padding: 14px 16px;
+                    background: linear-gradient(180deg, #eef2f8 0%, #f7f8fc 100%);
+                    border-radius: 10px;
+                    border: 1px solid #dde4f1;
+                    font-size: 11px;
+                }}
+                .metric-item strong {{
+                    display: block;
+                    color: #506283;
+                    font-weight: 700;
+                    margin-bottom: 4px;
+                }}
+                .metric-item span {{
+                    color: #2f3f5c;
+                }}
+                .lower-grid {{
+                    display: grid;
+                    grid-template-columns: 170px 170px 1fr;
+                    gap: 16px;
+                    align-items: stretch;
+                }}
+                .notes {{
+                    margin-top: 28px;
+                    background: #f4f6fb;
+                    border: 1px solid #dbe2f0;
+                    border-radius: 10px;
+                    padding: 16px 18px;
+                    font-size: 12px;
+                }}
+                .notes h3 {{
+                    margin: 0 0 8px 0;
+                    color: #2c3e50;
+                    font-size: 14px;
+                }}
+                footer {{
+                    margin-top: 30px;
+                    text-align: center;
+                    font-size: 10px;
+                    color: #7d8ca3;
+                }}
             </style>
         </head>
         <body>
-            <div class="header">
-                <h1>📊 Relatório de Operação</h1>
-                <p>
-                    <strong>Símbolo:</strong> {operation.symbol} | 
-                    <strong>Tipo:</strong> {operation.tipo} | 
-                    <strong>Status:</strong> 
-                    <span class="status-badge status-{operation.status.lower().replace(' ', '-')}">
-                        {operation.status}
-                    </span>
-                </p>
-                <p><strong>Data:</strong> {datetime.now(BR_TZ).strftime('%d/%m/%Y %H:%M')}</p>
-            </div>
-            
-            <div class="stats">
-                <div class="stat-card">
-                    <h3>🎯 Entrada</h3>
-                    <div class="stat-value">R$ {operation.entrada:.2f}</div>
+            <div class="report-wrapper">
+                <div class="report-header">
+                    <h1>Relatório de Operação · {operation.symbol}</h1>
+                    <small>Gerado em {datetime.now(BR_TZ).strftime('%d/%m/%Y %H:%M')}</small>
                 </div>
-                <div class="stat-card">
-                    <h3>🛑 Stop</h3>
-                    <div class="stat-value">R$ {operation.stop:.2f}</div>
-                    <div>Pontos: {operation.pontos_stop:.2f}</div>
-                </div>
-                <div class="stat-card">
-                    <h3>🚀 Alvo</h3>
-                    <div class="stat-value">R$ {operation.alvo:.2f}</div>
-                    <div>Pontos: {operation.pontos_alvo:.2f}</div>
-                </div>
-            </div>
-            
-            <div class="stats">
-                <div class="stat-card">
-                    <h3>📈 Quantidade</h3>
-                    <div class="stat-value">{operation.quantidade}</div>
-                </div>
-                <div class="stat-card">
-                    <h3>💰 Preço Atual</h3>
-                    <div class="stat-value">R$ {operation.preco_atual:.2f}</div>
-                </div>
-                <div class="stat-card">
-                    <h3>⚖️ Risco/Retorno</h3>
-                    <div class="stat-value">
-                        {operation.pontos_alvo/operation.pontos_stop if operation.pontos_stop > 0 else 0:.2f}:1
+                <div class="summary">{summary_text}</div>
+                <div class="analysis-grid">
+                    <div class="details-card">
+                        <h2>Detalhes da Operação</h2>
+                        <table>{details_table_rows}</table>
                     </div>
+                    <div class="main-chart">{main_chart_html}</div>
                 </div>
-            </div>
-            
-            <div class="charts">
-                <h2>📈 Análise Técnica</h2>
-                {"".join([f'''
-                <div class="chart-container">
-                    <h3>{tf.upper()} - {operation.symbol}</h3>
-                    <img src="{img}">
+                <div class="metrics-row">
+                    <div class="metric-item"><strong>Vencimento</strong><span>{vencimento}</span></div>
+                    <div class="metric-item"><strong>Fechamento</strong><span>{fechamento}</span></div>
+                    <div class="metric-item"><strong>Ajuste</strong><span>{ajuste}</span></div>
+                    <div class="metric-item"><strong>Variação</strong><span>{variacao}</span></div>
+                    <div class="metric-item"><strong>Mínima</strong><span>{minima}</span></div>
+                    <div class="metric-item"><strong>Máxima</strong><span>{maxima}</span></div>
+                    <div class="metric-item"><strong>Volume Financeiro</strong><span>{volume_financeiro}</span></div>
                 </div>
-                ''' for tf, img in images.items()])}
+                <div class="lower-grid">
+                    {daily_chart_html}
+                    {weekly_chart_html}
+                    {intraday_chart_html}
+                </div>
+                <div class="notes">
+                    <h3>Observações</h3>
+                    <p>{observations_text}</p>
+                </div>
+                <footer>
+                    Relatório gerado automaticamente pelo Sistema de Trading · {datetime.now(BR_TZ).strftime('%d/%m/%Y %H:%M:%S')}
+                </footer>
             </div>
-            
-            <div class="observations">
-                <h2>📝 Observações</h2>
-                <p>{operation.observacoes or 'Sem observações registradas.'}</p>
-            </div>
-            
-            <footer style="margin-top: 40px; text-align: center; color: #6c757d; font-size: 12px;">
-                <p>Relatório gerado automaticamente pelo Sistema de Trading</p>
-                <p>Data: {datetime.now(BR_TZ).strftime('%d/%m/%Y %H:%M:%S')}</p>
-            </footer>
         </body>
         </html>
         """
@@ -1192,6 +1625,9 @@ realtime_manager = RealTimeManager(socketio, finance_data)
 # Caches para melhor performance
 price_cache = CacheManager(expiry_seconds=30)
 chart_cache = CacheManager(expiry_seconds=15)
+
+_BROWSER_FLAG_ENV = 'RELATORIOSTRADE_BROWSER_OPENED'
+_browser_opened = os.environ.get(_BROWSER_FLAG_ENV, '0') == '1'
 
 # ==================== ROTAS API ====================
 
@@ -1368,22 +1804,101 @@ def api_operation():
         elif operation.preco_atual <= operation.stop:
             operation.status = 'STOP ATINGIDO'
         
-        # Gera gráficos para PDF (múltiplos timeframes)
-        images = {}
-        for tf in ['15m', '1h', '1d']:
-            df = finance_data.get_candles(operation.symbol, tf, 80)
-            img = chart_generator.generate_chart_image(df, f"{operation.symbol} - {tf}")
-            if img:
-                images[tf] = img
+        # Gera gráficos para PDF priorizando o timeframe da operação
+        preferred_timeframes = []
+        for candidate in [operation.timeframe, '15m', '1h', '1d', '1w']:
+            if candidate and candidate not in preferred_timeframes:
+                preferred_timeframes.append(candidate)
+
+        chart_images: List[Dict[str, Any]] = []
+        indicator_df: Optional[pd.DataFrame] = None
+
+        for tf in preferred_timeframes:
+            df_real = finance_data.get_candles(operation.symbol, tf, 150)
+            df = df_real
+
+            def _has_candles(frame: Optional[pd.DataFrame]) -> bool:
+                if frame is None or frame.empty:
+                    return False
+                valid = frame[['open', 'high', 'low', 'close']].dropna()
+                return len(valid.index) >= 2
+
+            if not _has_candles(df):
+                logger.warning(
+                    "Dataset insuficiente para %s no timeframe %s; usando fallback",
+                    operation.symbol,
+                    tf
+                )
+                df = finance_data._generate_fallback_data(
+                    operation.symbol,
+                    tf,
+                    150,
+                    reason=f"pdf_fallback_{tf}"
+                )
+
+            if indicator_df is None and _has_candles(df_real):
+                indicator_df = df_real
+            if indicator_df is None and _has_candles(df):
+                indicator_df = df
+
+            img = chart_generator.generate_chart_image(
+                df,
+                f"{operation.symbol} - {tf}",
+                operation=operation
+            )
+
+            last_row = df.iloc[-1] if len(df.index) > 0 else None
+            chart_images.append({
+                'timeframe': tf,
+                'image': img if img else PLACEHOLDER_IMAGE_DATA_URL,
+                'source': df.attrs.get('source', 'desconhecido'),
+                'last_close': float(last_row['close']) if last_row is not None and 'close' in df.columns else None,
+                'last_time': str(last_row['time_str']) if last_row is not None and 'time_str' in df.columns else None
+            })
+
+            if not img:
+                logger.warning(
+                    "Não foi possível renderizar imagem para %s em %s mesmo após fallback",
+                    operation.symbol,
+                    tf
+                )
+
+        if not chart_images:
+            logger.warning(
+                "Nenhum gráfico gerado para %s no timeframe %s; utilizando fallback sintético",
+                operation.symbol,
+                operation.timeframe
+            )
+            fallback_df = finance_data._generate_fallback_data(
+                operation.symbol,
+                operation.timeframe,
+                120,
+                reason='pdf_fallback'
+            )
+            fallback_img = chart_generator.generate_chart_image(
+                fallback_df,
+                f"{operation.symbol} - {operation.timeframe}",
+                operation=operation
+            )
+            fallback_row = fallback_df.iloc[-1] if len(fallback_df.index) > 0 else None
+            chart_images.append({
+                'timeframe': operation.timeframe,
+                'image': fallback_img if fallback_img else PLACEHOLDER_IMAGE_DATA_URL,
+                'source': fallback_df.attrs.get('source', 'fallback'),
+                'last_close': float(fallback_row['close']) if fallback_row is not None and 'close' in fallback_df.columns else None,
+                'last_time': str(fallback_row['time_str']) if fallback_row is not None and 'time_str' in fallback_df.columns else None
+            })
+            if indicator_df is None:
+                indicator_df = fallback_df
+
+        # Gera relatório PDF com gráficos analisados
+        pdf_path = report_generator.generate_pdf_report(operation, chart_images)
         
-        # Gera relatório PDF
-        pdf_path = report_generator.generate_pdf_report(operation, images)
-        
-        # Extrai indicadores atuais
+        # Extrai indicadores atuais com base no timeframe analisado
         indicators = {
-            'sma_9': float(df['SMA_9'].iloc[-1]) if 'SMA_9' in df.columns else None,
-            'sma_21': float(df['SMA_21'].iloc[-1]) if 'SMA_21' in df.columns else None,
-            'rsi': float(df['RSI'].iloc[-1]) if 'RSI' in df.columns else None,
+            'sma_9': float(indicator_df['SMA_9'].iloc[-1]) if indicator_df is not None and 'SMA_9' in indicator_df.columns else None,
+            'sma_21': float(indicator_df['SMA_21'].iloc[-1]) if indicator_df is not None and 'SMA_21' in indicator_df.columns else None,
+            'rsi': float(indicator_df['RSI'].iloc[-1]) if indicator_df is not None and 'RSI' in indicator_df.columns else None,
         }
         
         # Salva no banco de dados
@@ -1522,21 +2037,64 @@ def start_background_tasks():
 # ==================== INICIALIZAÇÃO ====================
 
 if __name__ == '__main__':
-    # Inicia tarefas em background
-    start_background_tasks()
+    # Arquivo de lock para garantir uma única abertura do navegador
+    LOCK_FILE = os.path.join(APP_DIR, '.browser_lock')
     
-    # Abre navegador automaticamente (opcional)
-    threading.Thread(
-        target=lambda: (time.sleep(3), webbrowser.open('http://127.0.0.1:5000')),
-        daemon=True
-    ).start()
+    def should_open_browser():
+        """Verifica se deve abrir o navegador usando arquivo de lock"""
+        try:
+            # Se o arquivo existe e foi criado há menos de 10 segundos, não abre
+            if os.path.exists(LOCK_FILE):
+                file_age = time.time() - os.path.getmtime(LOCK_FILE)
+                if file_age < 10:
+                    return False
+                else:
+                    # Arquivo antigo, remove
+                    os.remove(LOCK_FILE)
+            
+            # Cria arquivo de lock
+            with open(LOCK_FILE, 'w') as f:
+                f.write(str(os.getpid()))
+            return True
+        except:
+            return False
     
-    logger.info("✅ Servidor iniciado em http://127.0.0.1:5000")
-    logger.info("📊 Sistema de dados financeiros ativo")
-    
-    # Inicia servidor Flask com SocketIO
-    socketio.run(app, 
-                debug=True,  # Modo debug (desativar em produção)
-                port=5000, 
-                allow_unsafe_werkzeug=True,
-                log_output=False)
+    def _is_primary_process() -> bool:
+        """Retorna True apenas para o processo principal do reloader do Flask."""
+        return (not app.debug) or os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
+
+    # Inicia tarefas em background apenas no processo principal
+    if _is_primary_process():
+        logger.info("🔁 Processo principal do Flask")
+        start_background_tasks()
+
+        # Abre navegador apenas se o lock permitir
+        if should_open_browser():
+            def _open_browser_once():
+                time.sleep(2)
+                webbrowser.open('http://127.0.0.1:5000')
+                logger.info("🌐 Navegador aberto automaticamente")
+
+            threading.Thread(target=_open_browser_once, daemon=True).start()
+        else:
+            logger.info("🌐 Navegador já foi aberto (pulando)")
+        
+        logger.info("✅ Servidor disponível em http://127.0.0.1:5000")
+    else:
+        logger.info("🔄 Processo do reloader (monitoramento)")
+
+    try:
+        socketio.run(
+            app,
+            debug=True,
+            port=5000,
+            allow_unsafe_werkzeug=True,
+            log_output=False
+        )
+    finally:
+        # Remove lock ao finalizar
+        if os.path.exists(LOCK_FILE):
+            try:
+                os.remove(LOCK_FILE)
+            except:
+                pass
