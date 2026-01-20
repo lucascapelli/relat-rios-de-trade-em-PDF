@@ -11,7 +11,9 @@ class TradingApp {
             displaylogo: false,
             modeBarButtonsToRemove: ['select2d', 'lasso2d']
         };
-        this.lastChartData = null;
+        this.lastSeries = null;
+        this.lastIndicators = null;
+        this.lastChartTitle = '';
         this.subscribedSymbols = new Set();
         this.operations = [];
         
@@ -139,24 +141,27 @@ class TradingApp {
                 throw new Error(data.error);
             }
             
-            this.lastChartData = data.chart_data;
-            this.renderChart(this.lastChartData, 'main-chart');
-            this.renderChart(this.lastChartData, 'analysis-chart');
-            this.updateIndicators(data.indicators);
+            this.lastSeries = data.series;
+            this.lastIndicators = data.indicators;
+            const activeSymbol = data.symbol || symbol;
+            const chartTitle = `${activeSymbol} - ${this.getIntervalName(interval)}`;
+            this.lastChartTitle = chartTitle;
+
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'main-chart', chartTitle);
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', chartTitle);
+            this.updateIndicators(this.lastIndicators);
             if (Array.isArray(data.candles) && data.candles.length > 0) {
                 this.updateCurrentPrice(data.candles[data.candles.length - 1]);
             }
-            
+
             // Update labels with normalized símbolo
-            const activeSymbol = data.symbol || symbol;
             this.currentSymbol = activeSymbol;
             document.getElementById('current-symbol').textContent = activeSymbol;
             const chartSymbolInput = document.getElementById('chart-symbol-input');
             if (chartSymbolInput) {
                 chartSymbolInput.value = activeSymbol;
             }
-            document.getElementById('chart-title').textContent = 
-                `${activeSymbol} - ${this.getIntervalName(interval)}`;
+            document.getElementById('chart-title').textContent = chartTitle;
 
             if (this.socket) {
                 this.socket.emit('request_chart', {
@@ -171,25 +176,172 @@ class TradingApp {
         }
     }
     
-    renderChart(chartData, containerId) {
-        if (!chartData) {
+    renderSeriesChart(series, indicators, containerId, title) {
+        if (!series || !series.open || !series.open.length) {
+            console.warn('Série vazia para renderização do gráfico', series);
             return;
         }
-        
+
         const container = document.getElementById(containerId);
         if (!container) {
             return;
         }
 
-        if (!chartData.data || !chartData.layout) {
-            console.warn('Formato do gráfico inválido recebido', chartData);
-            return;
+        const xAxis = series.time_str || series.time;
+        const candlestickTrace = {
+            type: 'candlestick',
+            x: xAxis,
+            open: series.open,
+            high: series.high,
+            low: series.low,
+            close: series.close,
+            name: 'Preço',
+            increasing: {
+                line: { color: '#26a69a' },
+                fillcolor: '#26a69a'
+            },
+            decreasing: {
+                line: { color: '#ef5350' },
+                fillcolor: '#ef5350'
+            },
+            whiskerwidth: 0.8,
+            hoverinfo: 'x+open+high+low+close'
+        };
+
+        const traces = [candlestickTrace];
+
+        if (Array.isArray(series.volume)) {
+            traces.push({
+                type: 'bar',
+                x: xAxis,
+                y: series.volume,
+                name: 'Volume',
+                marker: {
+                    color: series.close.map((close, idx) => {
+                        const open = series.open[idx];
+                        return close >= open ? 'rgba(38, 166, 154, 0.6)' : 'rgba(239, 83, 80, 0.6)';
+                    })
+                },
+                opacity: 0.7,
+                yaxis: 'y2',
+                hoverinfo: 'x+y'
+            });
         }
-        
+
+        if (Array.isArray(series.sma_9)) {
+            traces.push({
+                type: 'scatter',
+                mode: 'lines',
+                x: xAxis,
+                y: series.sma_9,
+                name: 'SMA 9',
+                line: { color: '#2196F3', width: 1.5 },
+                opacity: 0.7
+            });
+        }
+
+        if (Array.isArray(series.sma_21)) {
+            traces.push({
+                type: 'scatter',
+                mode: 'lines',
+                x: xAxis,
+                y: series.sma_21,
+                name: 'SMA 21',
+                line: { color: '#FF9800', width: 1.5 },
+                opacity: 0.7
+            });
+        }
+
+        if (Array.isArray(series.bb_upper) && Array.isArray(series.bb_middle) && Array.isArray(series.bb_lower)) {
+            traces.push({
+                type: 'scatter',
+                mode: 'lines',
+                x: xAxis,
+                y: series.bb_upper,
+                name: 'BB Superior',
+                line: { color: 'rgba(158, 158, 158, 0.5)', width: 1, dash: 'dash' },
+                showlegend: false
+            });
+            traces.push({
+                type: 'scatter',
+                mode: 'lines',
+                x: xAxis,
+                y: series.bb_lower,
+                name: 'BB Inferior',
+                line: { color: 'rgba(158, 158, 158, 0.5)', width: 1, dash: 'dash' },
+                fill: 'tonexty',
+                fillcolor: 'rgba(158, 158, 158, 0.1)',
+                showlegend: false
+            });
+        }
+
+        const layout = {
+            title: {
+                text: title,
+                font: { size: 16, color: '#2c3e50', family: 'Arial Black' },
+                x: 0.5,
+                xanchor: 'center'
+            },
+            xaxis: {
+                type: 'date',
+                gridcolor: '#ecf0f1',
+                showgrid: true,
+                rangeslider: { visible: false },
+                nticks: 15,
+                tickfont: { size: 10 },
+                rangeselector: {
+                    buttons: [
+                        { count: 30, label: '30min', step: 'minute', stepmode: 'backward' },
+                        { count: 1, label: '1h', step: 'hour', stepmode: 'backward' },
+                        { count: 4, label: '4h', step: 'hour', stepmode: 'backward' },
+                        { count: 1, label: '1d', step: 'day', stepmode: 'backward' },
+                        { step: 'all', label: 'Tudo' }
+                    ],
+                    bgcolor: 'rgba(255, 255, 255, 0.9)',
+                    activecolor: '#2196F3',
+                    x: 0.01,
+                    y: 1.05,
+                    font: { size: 9 }
+                }
+            },
+            yaxis: {
+                title: 'Preço (R$)',
+                gridcolor: '#ecf0f1',
+                showgrid: true,
+                side: 'right',
+                tickformat: '.2f',
+                tickprefix: 'R$ ',
+                tickfont: { size: 10 }
+            },
+            yaxis2: {
+                title: 'Volume',
+                overlaying: 'y',
+                side: 'left',
+                showgrid: false,
+                tickformat: ',.0f',
+                tickfont: { size: 9 }
+            },
+            height: 550,
+            margin: { l: 50, r: 60, t: 70, b: 50 },
+            hovermode: 'x unified',
+            plot_bgcolor: 'white',
+            paper_bgcolor: '#f8f9fa',
+            showlegend: true,
+            legend: {
+                x: 0.01,
+                y: 0.99,
+                bgcolor: 'rgba(255, 255, 255, 0.95)',
+                bordercolor: '#bdc3c7',
+                borderwidth: 1,
+                font: { size: 9 }
+            },
+            font: { family: 'Arial, sans-serif' }
+        };
+
         if (this.charts[containerId]) {
-            Plotly.react(container, chartData.data, chartData.layout, this.chartConfig);
+            Plotly.react(container, traces, layout, this.chartConfig);
         } else {
-            Plotly.newPlot(container, chartData.data, chartData.layout, this.chartConfig);
+            Plotly.newPlot(container, traces, layout, this.chartConfig);
             this.charts[containerId] = true;
         }
     }
@@ -487,15 +639,21 @@ class TradingApp {
     handleChartData(data) {
         // Update chart if it's for the current symbol and interval
         if (data.symbol === this.currentSymbol && data.interval === this.currentInterval) {
-            const chartPayload = data.chart;
-            if (!chartPayload) {
-                console.warn('Atualização de chart sem payload recebida', data);
+            if (!data.series) {
+                console.warn('Atualização de chart sem série recebida', data);
                 return;
             }
 
-            this.lastChartData = chartPayload;
-            this.renderChart(this.lastChartData, 'analysis-chart');
-            this.renderChart(this.lastChartData, 'main-chart');
+            this.lastSeries = data.series;
+            this.lastIndicators = data.indicators || this.lastIndicators;
+            const title = `${data.symbol} - ${this.getIntervalName(data.interval)}`;
+            this.lastChartTitle = title;
+
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', title);
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'main-chart', title);
+            if (this.lastIndicators) {
+                this.updateIndicators(this.lastIndicators);
+            }
             this.resizeChart('analysis-chart');
             this.resizeChart('main-chart');
         }
@@ -503,8 +661,8 @@ class TradingApp {
 
     handleSectionChange(section) {
         if (section === 'chart') {
-            if (this.lastChartData) {
-                this.renderChart(this.lastChartData, 'analysis-chart');
+            if (this.lastSeries) {
+                this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', this.lastChartTitle);
                 this.resizeChart('analysis-chart');
             } else {
                 this.loadChart(this.currentSymbol, this.currentInterval);
@@ -515,6 +673,11 @@ class TradingApp {
                     symbol: this.currentSymbol,
                     interval: this.currentInterval
                 });
+            }
+
+            const chartTitleEl = document.getElementById('chart-title');
+            if (chartTitleEl) {
+                chartTitleEl.textContent = this.lastChartTitle || `${this.currentSymbol} - ${this.getIntervalName(this.currentInterval)}`;
             }
         }
     }

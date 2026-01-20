@@ -349,8 +349,8 @@ class FinanceData:
             df = self._fetch_yfinance_data(symbol_yf, interval, periods)
             
             if df is None or df.empty:
-                logger.warning(f"Sem dados reais para {symbol}, usando fallback")
-                return self._generate_fallback_data(symbol, interval, periods)
+                logger.warning(f"Sem dados reais para {symbol} ({interval}), usando fallback")
+                return self._generate_fallback_data(symbol, interval, periods, reason='fallback_no_data')
             
             # Processa dados
             df = self._process_candle_data(df, symbol_yf, periods)
@@ -361,14 +361,17 @@ class FinanceData:
             # Garante dataset utilizável; fallback se insuficiente
             valid = df[['open', 'high', 'low', 'close']].dropna()
             if len(valid) < 2:
-                logger.warning(f"Candles insuficientes para {symbol}: {len(valid)} disponíveis; usando fallback")
-                return self._generate_fallback_data(symbol, interval, periods)
+                logger.warning(f"Candles insuficientes para {symbol} ({interval}): {len(valid)} disponíveis; usando fallback")
+                return self._generate_fallback_data(symbol, interval, periods, reason='fallback_insufficient')
+
+            df.attrs['source'] = 'yfinance'
+            self._log_dataset_snapshot(df, symbol, interval, source='yfinance')
             
             return df
             
         except Exception as e:
             logger.error(f"Erro ao buscar candles para {symbol}: {e}")
-            return self._generate_fallback_data(symbol, interval, periods)
+            return self._generate_fallback_data(symbol, interval, periods, reason='fallback_error')
     
     def _fetch_yfinance_data(self, symbol: str, interval: str, periods: int) -> Optional[pd.DataFrame]:
         """Busca dados do yfinance com mapeamento de intervalos"""
@@ -437,7 +440,40 @@ class FinanceData:
         
         return df[mask].copy()  # Retorna apenas candles válidos
     
-    def _generate_fallback_data(self, symbol: str, interval: str, periods: int) -> pd.DataFrame:
+    def _log_dataset_snapshot(self, df: pd.DataFrame, symbol: str, interval: str, source: str):
+        """Registra amostra dos dados obtidos para inspeção"""
+        if df is None or df.empty:
+            logger.warning(f"[MarketData] {source} {symbol} ({interval}): dataset vazio")
+            return
+
+        first = df.iloc[0]
+        last = df.iloc[-1]
+
+        def safe_time(row: pd.Series) -> str:
+            if 'time_str' in row.index:
+                return str(row['time_str'])
+            if 'time' in row.index:
+                return str(row['time'])
+            return str(row.name)
+
+        def safe_value(row: pd.Series, key: str) -> Optional[float]:
+            if key in row.index and not pd.isna(row[key]):
+                value = row[key]
+                if isinstance(value, (int, float, np.floating)):
+                    return float(value)
+            return None
+
+        def fmt(value: Optional[float]) -> str:
+            return f"{value:.2f}" if value is not None else "-"
+
+        msg = (
+            f"[MarketData] {source} {symbol} ({interval}) -> registros={len(df)} "
+            f"primeiro={safe_time(first)} O={fmt(safe_value(first, 'open'))} C={fmt(safe_value(first, 'close'))} "
+            f"último={safe_time(last)} O={fmt(safe_value(last, 'open'))} C={fmt(safe_value(last, 'close'))}"
+        )
+        logger.info(msg)
+
+    def _generate_fallback_data(self, symbol: str, interval: str, periods: int, reason: str = 'fallback') -> pd.DataFrame:
         """Gera dados de fallback realistas quando API falha"""
         # Configurações por intervalo (volatilidade e frequência)
         config = {
@@ -500,8 +536,9 @@ class FinanceData:
         
         df = pd.DataFrame(data)
         df = self.indicators.calculate_all(df)  # Adiciona indicadores
-        
-        logger.info(f"Fallback gerado para {symbol}: {len(df)} candles")
+        df.attrs['source'] = reason
+        self._log_dataset_snapshot(df, symbol, interval, source=reason)
+        logger.info(f"Fallback gerado para {symbol} ({interval}) com razão '{reason}': {len(df)} candles")
         
         return df
 
@@ -847,6 +884,12 @@ class RealTimeManager:
         self.active_symbols = set()  # Símbolos sendo monitorados
         self.symbol_data = {}  # Cache de dados por símbolo
         self.running = False  # Flag de controle do loop
+
+    def _normalize_symbol(self, symbol: str) -> str:
+        """Normaliza símbolo para formato aceito pelo yfinance"""
+        if symbol and not symbol.endswith('.SA') and symbol[-1].isdigit():
+            return f"{symbol}.SA"
+        return symbol
     
     def update_symbol(self, symbol: str):
         """Atualiza dados de um símbolo específico"""
@@ -854,6 +897,8 @@ class RealTimeManager:
             info = self.finance_data.get_ticker_info(symbol)
             
             if info:
+                room_symbol = symbol
+                display_symbol = room_symbol.replace('.SA', '')
                 # Armazena dados com timestamp
                 self.symbol_data[symbol] = {
                     **asdict(info),
@@ -863,9 +908,9 @@ class RealTimeManager:
                 
                 # Emite atualização via WebSocket para sala específica
                 self.socketio.emit('price_update', {
-                    'symbol': symbol,
+                    'symbol': display_symbol,
                     'data': asdict(info)
-                }, room=f"symbol_{symbol}")
+                }, room=f"symbol_{room_symbol}")
                 
                 return info
                 
@@ -897,14 +942,16 @@ class RealTimeManager:
     
     def subscribe(self, symbol: str):
         """Inscreve em um símbolo (adiciona à lista de monitoramento)"""
-        if not symbol.endswith('.SA') and symbol[-1].isdigit():
-            symbol = f"{symbol}.SA"
-        self.active_symbols.add(symbol)
+        normalized = self._normalize_symbol(symbol)
+        self.active_symbols.add(normalized)
+        return normalized
     
     def unsubscribe(self, symbol: str):
         """Cancela inscrição em um símbolo"""
-        if symbol in self.active_symbols:
-            self.active_symbols.remove(symbol)
+        normalized = self._normalize_symbol(symbol)
+        if normalized in self.active_symbols:
+            self.active_symbols.remove(normalized)
+        return normalized
 
 # ==================== BANCO DE DADOS ====================
 
@@ -1186,41 +1233,106 @@ def api_quote(symbol):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def _build_chart_components(df: pd.DataFrame, limit: int = 100) -> Tuple[List[Dict[str, Any]], Dict[str, List[Any]]]:
+    """Serializa candles e séries completas para consumo no front-end"""
+    df_tail = df.iloc[-limit:].copy()
+    candles: List[Dict[str, Any]] = []
+    series: Dict[str, List[Any]] = {
+        'time': [],
+        'time_str': [],
+        'open': [],
+        'high': [],
+        'low': [],
+        'close': [],
+        'volume': []
+    }
+
+    indicator_columns = {
+        'sma_9': 'SMA_9',
+        'sma_21': 'SMA_21',
+        'ema_12': 'EMA_12',
+        'ema_26': 'EMA_26',
+        'rsi_series': 'RSI',
+        'bb_upper': 'BB_upper',
+        'bb_middle': 'BB_middle',
+        'bb_lower': 'BB_lower'
+    }
+
+    for key, col in indicator_columns.items():
+        if col in df_tail.columns:
+            series[key] = []
+
+    for _, row in df_tail.iterrows():
+        volume_value = row.get('volume', 0)
+        if pd.isna(volume_value):
+            volume_value = 0
+
+        iso_time = row['time'].isoformat() if hasattr(row['time'], 'isoformat') else str(row['time'])
+        time_str = row['time_str'] if 'time_str' in row.index else iso_time
+
+        candles.append({
+            'time': iso_time,
+            'time_str': time_str,
+            'open': float(row['open']),
+            'high': float(row['high']),
+            'low': float(row['low']),
+            'close': float(row['close']),
+            'volume': int(volume_value)
+        })
+
+        series['time'].append(iso_time)
+        series['time_str'].append(time_str)
+        series['open'].append(float(row['open']))
+        series['high'].append(float(row['high']))
+        series['low'].append(float(row['low']))
+        series['close'].append(float(row['close']))
+        series['volume'].append(int(volume_value))
+
+        for key, col in indicator_columns.items():
+            if key in series:
+                value = row.get(col)
+                series[key].append(float(value) if value is not None and not pd.isna(value) else None)
+
+    return candles, series
+
+
 @app.route('/api/chart/<symbol>/<interval>')
 def api_chart(symbol, interval):
     """API para dados do gráfico (candles + indicadores)"""
     try:
         df = finance_data.get_candles(symbol, interval, 100)
         fig = chart_generator.create_plotly_chart(df, f'{symbol} - {interval}')
-        
-        # Prepara candles para retorno
-        candles = []
-        for _, row in df.iterrows():
-            volume_value = row.get('volume', 0)
-            if pd.isna(volume_value):
-                volume_value = 0
-            candles.append({
-                'time': row['time'].isoformat() if hasattr(row['time'], 'isoformat') else str(row['time']),
-                'time_str': row['time_str'],
-                'open': float(row['open']),
-                'high': float(row['high']),
-                'low': float(row['low']),
-                'close': float(row['close']),
-                'volume': int(volume_value)
-            })
-        
+
+        candles_payload, series = _build_chart_components(df, limit=100)
+
+        source = df.attrs.get('source', 'unknown')
+        if candles_payload:
+            last_candle = candles_payload[-1]
+            last_open = float(last_candle.get('open', 0) or 0)
+            last_close = float(last_candle.get('close', 0) or 0)
+            logger.info(
+                f"/api/chart {symbol}/{interval} -> source={source} candles={len(candles_payload)} "
+                f"último={last_candle.get('time_str')} O={last_open:.2f} C={last_close:.2f}"
+            )
+        else:
+            logger.warning(f"/api/chart {symbol}/{interval} -> source={source} sem candles retornados")
+
+        indicators_snapshot = {
+            'sma_9': float(df['SMA_9'].iloc[-1]) if 'SMA_9' in df.columns else None,
+            'sma_21': float(df['SMA_21'].iloc[-1]) if 'SMA_21' in df.columns else None,
+            'rsi': float(df['RSI'].iloc[-1]) if 'RSI' in df.columns else None,
+        }
+
         return jsonify({
             'symbol': symbol,
             'interval': interval,
-            'candles': candles[-100:],  # Últimos 100 candles
-            'indicators': {
-                'sma_9': float(df['SMA_9'].iloc[-1]) if 'SMA_9' in df.columns else None,
-                'sma_21': float(df['SMA_21'].iloc[-1]) if 'SMA_21' in df.columns else None,
-                'rsi': float(df['RSI'].iloc[-1]) if 'RSI' in df.columns else None,
-            },
+            'source': source,
+            'candles': candles_payload,
+            'series': series,
+            'indicators': indicators_snapshot,
             'chart_data': json.loads(json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder))
         })
-        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1326,14 +1438,14 @@ def handle_subscribe(data):
     symbol = data.get('symbol')
     
     if symbol:
-        realtime_manager.subscribe(symbol)
-        join_room(f"symbol_{symbol}")  # Entra na sala do símbolo
+        room_symbol = realtime_manager.subscribe(symbol)
+        join_room(f"symbol_{room_symbol}")  # Entra na sala normalizada
         
         # Envia dados atuais imediatamente
         info = finance_data.get_ticker_info(symbol)
         if info:
             emit('price_update', {
-                'symbol': symbol,
+                'symbol': info.symbol,
                 'data': asdict(info)
             })
         
@@ -1349,8 +1461,8 @@ def handle_unsubscribe(data):
     symbol = data.get('symbol')
     
     if symbol:
-        realtime_manager.unsubscribe(symbol)
-        leave_room(f"symbol_{symbol}")  # Sai da sala
+        room_symbol = realtime_manager.unsubscribe(symbol)
+        leave_room(f"symbol_{room_symbol}")  # Sai da sala normalizada
         
         emit('unsubscription_confirmed', {
             'symbol': symbol,
@@ -1366,10 +1478,20 @@ def handle_chart_request(data):
         
         df = finance_data.get_candles(symbol, interval, 100)
         fig = chart_generator.create_plotly_chart(df, f'{symbol} - {interval}')
-        
+        candles_payload, series = _build_chart_components(df, limit=100)
+        source = df.attrs.get('source', 'unknown')
+
         emit('chart_data', {
             'symbol': symbol,
             'interval': interval,
+            'source': source,
+            'candles': candles_payload,
+            'series': series,
+            'indicators': {
+                'sma_9': float(df['SMA_9'].iloc[-1]) if 'SMA_9' in df.columns else None,
+                'sma_21': float(df['SMA_21'].iloc[-1]) if 'SMA_21' in df.columns else None,
+                'rsi': float(df['RSI'].iloc[-1]) if 'RSI' in df.columns else None,
+            },
             'chart': json.loads(json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder))
         })
         
