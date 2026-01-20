@@ -709,6 +709,10 @@
                     
                     document.getElementById(`${section}-section`).style.display = 'block';
                     document.getElementById(`${section}-section`).classList.add('active');
+
+                    if (window.tradingApp && typeof window.tradingApp.handleSectionChange === 'function') {
+                        window.tradingApp.handleSectionChange(section);
+                    }
                 });
             });
             

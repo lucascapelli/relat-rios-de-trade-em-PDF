@@ -4,7 +4,14 @@ class TradingApp {
         this.socket = null;
         this.currentSymbol = 'PETR4';
         this.currentInterval = '15m';
-        this.chart = null;
+        this.charts = {};
+        this.chartConfig = {
+            responsive: true,
+            displayModeBar: true,
+            displaylogo: false,
+            modeBarButtonsToRemove: ['select2d', 'lasso2d']
+        };
+        this.lastChartData = null;
         this.subscribedSymbols = new Set();
         this.operations = [];
         
@@ -132,13 +139,31 @@ class TradingApp {
                 throw new Error(data.error);
             }
             
-            this.renderChart(data.chart_data, 'main-chart');
+            this.lastChartData = data.chart_data;
+            this.renderChart(this.lastChartData, 'main-chart');
+            this.renderChart(this.lastChartData, 'analysis-chart');
             this.updateIndicators(data.indicators);
-            this.updateCurrentPrice(data.candles[data.candles.length - 1]);
+            if (Array.isArray(data.candles) && data.candles.length > 0) {
+                this.updateCurrentPrice(data.candles[data.candles.length - 1]);
+            }
             
-            // Update chart title
+            // Update labels with normalized símbolo
+            const activeSymbol = data.symbol || symbol;
+            this.currentSymbol = activeSymbol;
+            document.getElementById('current-symbol').textContent = activeSymbol;
+            const chartSymbolInput = document.getElementById('chart-symbol-input');
+            if (chartSymbolInput) {
+                chartSymbolInput.value = activeSymbol;
+            }
             document.getElementById('chart-title').textContent = 
-                `${symbol} - ${this.getIntervalName(interval)}`;
+                `${activeSymbol} - ${this.getIntervalName(interval)}`;
+
+            if (this.socket) {
+                this.socket.emit('request_chart', {
+                    symbol: activeSymbol,
+                    interval
+                });
+            }
                 
         } catch (error) {
             console.error('Erro ao carregar gráfico:', error);
@@ -147,17 +172,32 @@ class TradingApp {
     }
     
     renderChart(chartData, containerId) {
-        const container = document.getElementById(containerId);
+        if (!chartData) {
+            return;
+        }
         
-        if (this.chart) {
-            Plotly.react(container, chartData.data, chartData.layout);
+        const container = document.getElementById(containerId);
+        if (!container) {
+            return;
+        }
+
+        if (!chartData.data || !chartData.layout) {
+            console.warn('Formato do gráfico inválido recebido', chartData);
+            return;
+        }
+        
+        if (this.charts[containerId]) {
+            Plotly.react(container, chartData.data, chartData.layout, this.chartConfig);
         } else {
-            this.chart = Plotly.newPlot(container, chartData.data, chartData.layout, {
-                responsive: true,
-                displayModeBar: true,
-                displaylogo: false,
-                modeBarButtonsToRemove: ['select2d', 'lasso2d']
-            });
+            Plotly.newPlot(container, chartData.data, chartData.layout, this.chartConfig);
+            this.charts[containerId] = true;
+        }
+    }
+
+    resizeChart(containerId) {
+        const container = document.getElementById(containerId);
+        if (container && this.charts[containerId]) {
+            Plotly.Plots.resize(container);
         }
     }
     
@@ -447,7 +487,35 @@ class TradingApp {
     handleChartData(data) {
         // Update chart if it's for the current symbol and interval
         if (data.symbol === this.currentSymbol && data.interval === this.currentInterval) {
-            this.renderChart(data.chart, 'analysis-chart');
+            const chartPayload = data.chart;
+            if (!chartPayload) {
+                console.warn('Atualização de chart sem payload recebida', data);
+                return;
+            }
+
+            this.lastChartData = chartPayload;
+            this.renderChart(this.lastChartData, 'analysis-chart');
+            this.renderChart(this.lastChartData, 'main-chart');
+            this.resizeChart('analysis-chart');
+            this.resizeChart('main-chart');
+        }
+    }
+
+    handleSectionChange(section) {
+        if (section === 'chart') {
+            if (this.lastChartData) {
+                this.renderChart(this.lastChartData, 'analysis-chart');
+                this.resizeChart('analysis-chart');
+            } else {
+                this.loadChart(this.currentSymbol, this.currentInterval);
+            }
+            
+            if (this.socket) {
+                this.socket.emit('request_chart', {
+                    symbol: this.currentSymbol,
+                    interval: this.currentInterval
+                });
+            }
         }
     }
     

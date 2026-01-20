@@ -357,6 +357,12 @@ class FinanceData:
             
             # Adiciona indicadores técnicos
             df = self.indicators.calculate_all(df)
+
+            # Garante dataset utilizável; fallback se insuficiente
+            valid = df[['open', 'high', 'low', 'close']].dropna()
+            if len(valid) < 2:
+                logger.warning(f"Candles insuficientes para {symbol}: {len(valid)} disponíveis; usando fallback")
+                return self._generate_fallback_data(symbol, interval, periods)
             
             return df
             
@@ -1190,6 +1196,9 @@ def api_chart(symbol, interval):
         # Prepara candles para retorno
         candles = []
         for _, row in df.iterrows():
+            volume_value = row.get('volume', 0)
+            if pd.isna(volume_value):
+                volume_value = 0
             candles.append({
                 'time': row['time'].isoformat() if hasattr(row['time'], 'isoformat') else str(row['time']),
                 'time_str': row['time_str'],
@@ -1197,7 +1206,7 @@ def api_chart(symbol, interval):
                 'high': float(row['high']),
                 'low': float(row['low']),
                 'close': float(row['close']),
-                'volume': int(row['volume'])
+                'volume': int(volume_value)
             })
         
         return jsonify({
