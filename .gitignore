@@ -53,5 +53,9 @@ build/
 *.manifest
 *.spec
 
+# Binaries and documents
+*.exe
+*.pdf
+
 # Copilot instructions
 .github/copilot-instructions.md

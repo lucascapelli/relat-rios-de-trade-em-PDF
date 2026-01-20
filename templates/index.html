@@ -3,210 +3,732 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Relatórios de Trade</title>
+    <title>📈 Sistema de Trading - Dashboard</title>
+    
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Plotly -->
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    
+    <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    
     <style>
-        .realtime-controls {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            align-items: center;
+        /* Estilos inline para garantir carregamento imediato */
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --success-color: #27ae60;
+            --danger-color: #e74c3c;
+            --warning-color: #f39c12;
+            --light-bg: #f8f9fa;
+            --dark-bg: #2c3e50;
         }
         
-        .realtime-controls select, .realtime-controls button {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--light-bg);
+            color: #333;
         }
         
-        .realtime-controls button {
-            background: #3498db;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        
-        .realtime-controls button:hover {
-            background: #2980b9;
-        }
-        
-        .status-indicator {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
+        .navbar-brand {
             font-weight: bold;
+            color: var(--primary-color) !important;
         }
         
-        .status-connected {
-            background: #d4edda;
-            color: #155724;
+        .stock-card {
+            transition: transform 0.3s, box-shadow 0.3s;
+            border: none;
+            border-radius: 10px;
+            overflow: hidden;
         }
         
-        .status-disconnected {
-            background: #f8d7da;
-            color: #721c24;
+        .stock-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1) !important;
+        }
+        
+        .positive {
+            color: var(--success-color) !important;
+        }
+        
+        .negative {
+            color: var(--danger-color) !important;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        
+        .timeframe-btn.active {
+            background-color: var(--secondary-color) !important;
+            color: white !important;
+            border-color: var(--secondary-color) !important;
+        }
+        
+        .operation-card {
+            border-left: 4px solid;
+            transition: all 0.3s;
+        }
+        
+        .operation-card.aberta {
+            border-left-color: var(--warning-color);
+        }
+        
+        .operation-card.alvo {
+            border-left-color: var(--success-color);
+        }
+        
+        .operation-card.stop {
+            border-left-color: var(--danger-color);
+        }
+        
+        .modal-content {
+            border-radius: 15px;
+            border: none;
+        }
+        
+        .form-control:focus, .form-select:focus {
+            border-color: var(--secondary-color);
+            box-shadow: 0 0 0 0.25rem rgba(52, 152, 219, 0.25);
+        }
+        
+        .btn-primary {
+            background-color: var(--secondary-color);
+            border-color: var(--secondary-color);
+        }
+        
+        .btn-primary:hover {
+            background-color: #2980b9;
+            border-color: #2980b9;
+        }
+        
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            flex-direction: column;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid var(--secondary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1055;
+            min-width: 300px;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>📊 Relatório de Trade</h1>
-            <p>Preencha as informações da operação - Gráficos em Tempo Real</p>
-        </div>
-        
-        <div class="nav-tabs">
-            <button class="nav-tab active" onclick="showTab('form', event)">Formulário</button>
-            <button class="nav-tab" onclick="showTab('graficos', event)">Gráficos em Tempo Real</button>
-            <button class="nav-tab" onclick="showTab('historico', event)">Histórico</button>
-        </div>
-        
-        <!-- ABA: FORMULÁRIO -->
-        <div id="form" class="tab-content active">
-            <form id="operacaoForm">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="ativo">Ativo</label>
-                        <input type="text" id="ativo" name="ativo" placeholder="Ex: PETR4" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="tipo">Tipo de Operação</label>
-                        <select id="tipo" name="tipo" required>
-                            <option value="">Selecione...</option>
-                            <option value="compra">Compra</option>
-                            <option value="venda">Venda</option>
-                        </select>
-                    </div>
-                </div>
-                
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="entrada">Entrada</label>
-                        <input type="number" id="entrada" name="entrada" placeholder="0.00" step="0.01" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="stop">Stop Loss</label>
-                        <input type="number" id="stop" name="stop" placeholder="0.00" step="0.01" required>
-                    </div>
-                </div>
-                
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="alvo">Alvo</label>
-                        <input type="number" id="alvo" name="alvo" placeholder="0.00" step="0.01" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="quantidade">Quantidade</label>
-                        <input type="number" id="quantidade" name="quantidade" placeholder="0" step="1" required>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="observacoes">Observações</label>
-                    <textarea id="observacoes" name="observacoes" placeholder="Notas sobre a operação..." rows="3"></textarea>
-                </div>
-                
-                <div class="button-group">
-                    <button type="submit" class="btn-primary">Gerar Relatório</button>
-                    <button type="reset" class="btn-secondary">Limpar</button>
-                </div>
-            </form>
+    <!-- Loading Overlay -->
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <p class="mt-3">Carregando sistema de trading...</p>
+    </div>
 
-            <h2>Operações Fictícias</h2>
-            <table border="1">
-                <tr>
-                    <th>Ativo</th><th>Entrada</th><th>Stop</th><th>Alvo</th><th>Preço Atual</th><th>Status</th>
-                </tr>
-                {% for op in ops %}
-                <tr>
-                    <td>{{ op.ativo }}</td>
-                    <td>{{ op.entrada }}</td>
-                    <td>{{ op.stop }}</td>
-                    <td>{{ op.alvo }}</td>
-                    <td>{{ op.preco_atual }}</td>
-                    <td>{{ op.status }}</td>
-                </tr>
-                {% endfor %}
-            </table>
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3"></div>
 
-            <h2>Gráfico Candle</h2>
-            <div id="graph" data-graph='{{ graphJSON | safe }}'></div>
-        </div>
-
-        <!-- ABA: GRÁFICOS EM TEMPO REAL -->
-        <div id="graficos" class="tab-content">
-            <h2>Monitoramento em Tempo Real</h2>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-chart-line me-2"></i>
+                <span class="fw-bold">Trading System</span>
+            </a>
             
-            <div class="realtime-controls">
-                <label for="realtimeAsset">Ativo:</label>
-                <select id="realtimeAsset">
-                    <option value="PETR4.SA">PETR4.SA</option>
-                    <option value="VALE3.SA">VALE3.SA</option>
-                    <option value="ITUB4.SA">ITUB4.SA</option>
-                    <option value="BBDC4.SA">BBDC4.SA</option>
-                    <option value="ABEV3.SA">ABEV3.SA</option>
-                </select>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#" data-section="dashboard">
+                            <i class="fas fa-tachometer-alt me-1"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-section="chart">
+                            <i class="fas fa-chart-candlestick me-1"></i> Gráfico
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-section="operation">
+                            <i class="fas fa-exchange-alt me-1"></i> Nova Operação
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-section="history">
+                            <i class="fas fa-history me-1"></i> Histórico
+                        </a>
+                    </li>
+                </ul>
                 
-                <label for="realtimeTimeframe">Timeframe:</label>
-                <select id="realtimeTimeframe">
-                    <option value="1min">1 Minuto</option>
-                    <option value="5min">5 Minutos</option>
-                    <option value="15min" selected>15 Minutos</option>
-                    <option value="30min">30 Minutos</option>
-                    <option value="60min">1 Hora</option>
-                    <option value="daily">Diário</option>
-                </select>
+                <div class="d-flex align-items-center">
+                    <div class="input-group me-3" style="max-width: 300px;">
+                        <input type="text" id="search-input" class="form-control form-control-sm" 
+                               placeholder="Buscar ativo (ex: PETR4)">
+                        <button class="btn btn-outline-primary btn-sm" id="search-btn">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" 
+                                data-bs-toggle="dropdown">
+                            <i class="fas fa-user-circle me-1"></i> Usuário
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="#"><i class="fas fa-cog me-2"></i> Configurações</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#"><i class="fas fa-sign-out-alt me-2"></i> Sair</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container-fluid mt-4">
+        <!-- Dashboard Section (Default) -->
+        <section id="dashboard-section" class="section active">
+            <div class="row">
+                <!-- Stocks Overview -->
+                <div class="col-md-3">
+                    <div class="card stock-card shadow-sm mb-4">
+                        <div class="card-header bg-primary text-white">
+                            <h6 class="mb-0"><i class="fas fa-star me-2"></i>Ativos Principais</h6>
+                        </div>
+                        <div class="card-body p-0">
+                            <div id="stocks-list" class="list-group list-group-flush">
+                                <!-- Stocks will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Stats -->
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-body">
+                            <h6 class="card-title mb-3">📊 Estatísticas Rápidas</h6>
+                            <div class="row text-center">
+                                <div class="col-6 mb-3">
+                                    <div class="text-muted small">Operações</div>
+                                    <div class="h5 fw-bold" id="stats-operations">0</div>
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <div class="text-muted small">Lucro/Prejuízo</div>
+                                    <div class="h5 fw-bold" id="stats-profit">R$ 0,00</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="text-muted small">Taxa de Acerto</div>
+                                    <div class="h5 fw-bold" id="stats-winrate">0%</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="text-muted small">Ativos</div>
+                                    <div class="h5 fw-bold" id="stats-assets">0</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 
-                <button id="realtimeRefreshBtn">Atualizar</button>
-                <div id="connectionStatus" class="status-indicator status-disconnected">Desconectado</div>
+                <!-- Main Chart -->
+                <div class="col-md-6">
+                    <div class="chart-container shadow-sm mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="mb-0" id="chart-title">PETR4 - 15 Minutos</h5>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-outline-primary btn-sm timeframe-btn active" 
+                                        data-interval="15m">15m</button>
+                                <button type="button" class="btn btn-outline-primary btn-sm timeframe-btn" 
+                                        data-interval="1h">1h</button>
+                                <button type="button" class="btn btn-outline-primary btn-sm timeframe-btn" 
+                                        data-interval="1d">1d</button>
+                            </div>
+                        </div>
+                        <div id="main-chart" style="height: 400px;"></div>
+                    </div>
+                    
+                    <!-- Market News -->
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h6 class="card-title mb-3">
+                                <i class="fas fa-newspaper me-2"></i>Notícias do Mercado
+                            </h6>
+                            <div id="market-news">
+                                <div class="alert alert-info mb-2">
+                                    <small><strong>B3:</strong> Ibovespa abre em alta de 0,5%</small>
+                                </div>
+                                <div class="alert alert-warning mb-2">
+                                    <small><strong>PETR4:</strong> Petrobras anuncia dividendos</small>
+                                </div>
+                                <div class="alert alert-success mb-2">
+                                    <small><strong>VALE3:</strong> Venda recorde no trimestre</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Recent Operations -->
+                <div class="col-md-3">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-dark text-white">
+                            <h6 class="mb-0"><i class="fas fa-clock me-2"></i>Operações Recentes</h6>
+                        </div>
+                        <div class="card-body p-0">
+                            <div id="recent-operations" class="list-group list-group-flush">
+                                <!-- Recent operations will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Chart Analysis Section -->
+        <section id="chart-section" class="section" style="display: none;">
+            <div class="row">
+                <div class="col-md-9">
+                    <div class="chart-container shadow-sm mb-4">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <div class="input-group">
+                                    <span class="input-group-text">
+                                        <i class="fas fa-search"></i>
+                                    </span>
+                                    <input type="text" id="chart-symbol-input" class="form-control" 
+                                           placeholder="Digite o símbolo (ex: PETR4)" value="PETR4">
+                                    <button class="btn btn-primary" id="load-chart-btn">
+                                        Carregar Gráfico
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="btn-group float-end" role="group">
+                                    <button type="button" class="btn btn-outline-primary timeframe-btn-chart active" 
+                                            data-interval="1m">1m</button>
+                                    <button type="button" class="btn btn-outline-primary timeframe-btn-chart" 
+                                            data-interval="5m">5m</button>
+                                    <button type="button" class="btn btn-outline-primary timeframe-btn-chart" 
+                                            data-interval="15m">15m</button>
+                                    <button type="button" class="btn btn-outline-primary timeframe-btn-chart" 
+                                            data-interval="1h">1h</button>
+                                    <button type="button" class="btn btn-outline-primary timeframe-btn-chart" 
+                                            data-interval="1d">1d</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="analysis-chart" style="height: 500px;"></div>
+                    </div>
+                    
+                    <!-- Indicators Panel -->
+                    <div class="card shadow-sm">
+                        <div class="card-header">
+                            <h6 class="mb-0"><i class="fas fa-chart-bar me-2"></i>Indicadores Técnicos</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row" id="indicators-panel">
+                                <!-- Indicators will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <!-- Quick Trade Panel -->
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header bg-success text-white">
+                            <h6 class="mb-0"><i class="fas fa-bolt me-2"></i>Operação Rápida</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label">Ativo</label>
+                                <input type="text" class="form-control" id="quick-symbol" value="PETR4">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Tipo</label>
+                                <select class="form-select" id="quick-type">
+                                    <option value="COMPRA">Compra</option>
+                                    <option value="VENDA">Venda</option>
+                                </select>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-6">
+                                    <label class="form-label">Entrada</label>
+                                    <input type="number" class="form-control" id="quick-entrada" step="0.01">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">Quantidade</label>
+                                    <input type="number" class="form-control" id="quick-quantidade" value="100">
+                                </div>
+                            </div>
+                            <button class="btn btn-success w-100" id="quick-trade-btn">
+                                <i class="fas fa-play me-2"></i>Executar
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Current Price Info -->
+                    <div class="card shadow-sm">
+                        <div class="card-body text-center">
+                            <h5 id="current-symbol">PETR4</h5>
+                            <h2 class="fw-bold" id="current-price">R$ 0,00</h2>
+                            <div class="mb-3">
+                                <span class="badge" id="price-change">0,00%</span>
+                            </div>
+                            <div class="row text-center">
+                                <div class="col-6">
+                                    <small class="text-muted">Mínima</small>
+                                    <div class="fw-bold" id="current-low">R$ 0,00</div>
+                                </div>
+                                <div class="col-6">
+                                    <small class="text-muted">Máxima</small>
+                                    <div class="fw-bold" id="current-high">R$ 0,00</div>
+                                </div>
+                            </div>
+                            <hr>
+                            <button class="btn btn-outline-primary btn-sm w-100" id="subscribe-btn">
+                                <i class="fas fa-sync-alt me-2"></i>Atualização em Tempo Real
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- New Operation Section -->
+        <section id="operation-section" class="section" style="display: none;">
+            <div class="row justify-content-center">
+                <div class="col-lg-8">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0"><i class="fas fa-plus-circle me-2"></i>Registrar Nova Operação</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="operation-form">
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Ativo <span class="text-danger">*</span></label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" id="operation-symbol" 
+                                                   placeholder="Ex: PETR4" required>
+                                            <button class="btn btn-outline-secondary" type="button" 
+                                                    id="fetch-price-btn">
+                                                <i class="fas fa-search-dollar"></i>
+                                            </button>
+                                        </div>
+                                        <div class="form-text" id="asset-name"></div>
+                                    </div>
+                                    
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Tipo de Operação <span class="text-danger">*</span></label>
+                                        <select class="form-select" id="operation-type" required>
+                                            <option value="COMPRA">Compra</option>
+                                            <option value="VENDA">Venda</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Preço de Entrada (R$) <span class="text-danger">*</span></label>
+                                        <input type="number" class="form-control" id="operation-entrada" 
+                                               step="0.01" min="0.01" required>
+                                    </div>
+                                    
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Stop Loss (R$) <span class="text-danger">*</span></label>
+                                        <input type="number" class="form-control" id="operation-stop" 
+                                               step="0.01" min="0.01" required>
+                                    </div>
+                                    
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Take Profit (R$) <span class="text-danger">*</span></label>
+                                        <input type="number" class="form-control" id="operation-alvo" 
+                                               step="0.01" min="0.01" required>
+                                    </div>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Quantidade <span class="text-danger">*</span></label>
+                                        <input type="number" class="form-control" id="operation-quantidade" 
+                                               value="100" min="1" required>
+                                    </div>
+                                    
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Timeframe</label>
+                                        <select class="form-select" id="operation-timeframe">
+                                            <option value="15m">15 Minutos</option>
+                                            <option value="1h">1 Hora</option>
+                                            <option value="1d">Diário</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Risco/Retorno</label>
+                                        <input type="text" class="form-control" id="risk-reward" 
+                                               readonly value="0:1">
+                                    </div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Observações</label>
+                                    <textarea class="form-control" id="operation-observacoes" 
+                                              rows="3" placeholder="Descreva a estratégia, setup, etc..."></textarea>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="card bg-light">
+                                            <div class="card-body">
+                                                <h6 class="card-title">Resumo da Operação</h6>
+                                                <div class="row">
+                                                    <div class="col-6">
+                                                        <small>Valor Total:</small>
+                                                        <div class="fw-bold" id="total-value">R$ 0,00</div>
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <small>Pontos Stop:</small>
+                                                        <div class="fw-bold" id="pontos-stop">0,00</div>
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <small>Pontos Alvo:</small>
+                                                        <div class="fw-bold" id="pontos-alvo">0,00</div>
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <small>Risco:</small>
+                                                        <div class="fw-bold" id="risco-total">R$ 0,00</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-6 d-flex align-items-center">
+                                        <button type="submit" class="btn btn-primary btn-lg w-100" 
+                                                id="submit-operation-btn">
+                                            <i class="fas fa-save me-2"></i>Registrar Operação
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- History Section -->
+        <section id="history-section" class="section" style="display: none;">
+            <div class="card shadow-sm">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-history me-2"></i>Histórico de Operações</h5>
+                    <button class="btn btn-sm btn-light" id="refresh-history-btn">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Ativo</th>
+                                    <th>Tipo</th>
+                                    <th>Entrada</th>
+                                    <th>Stop</th>
+                                    <th>Alvo</th>
+                                    <th>Qtd</th>
+                                    <th>Status</th>
+                                    <th>Data</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-table-body">
+                                <!-- History will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
             
-            <div id="realtimeChart" style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px;"></div>
-            
-            <div id="priceStats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;"></div>
-        </div>
-        
-        <!-- ABA: HISTÓRICO -->
-        <div id="historico" class="tab-content">
-            <h2>Histórico de Relatórios</h2>
-            <table border="1">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Ativo</th>
-                        <th>Data</th>
-                        <th>Ação</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr><td colspan="4" style="text-align: center; padding: 20px; color: #999;">Carregando...</td></tr>
-                </tbody>
-            </table>
+            <!-- Statistics -->
+            <div class="row mt-4">
+                <div class="col-md-3">
+                    <div class="card text-white bg-success shadow-sm">
+                        <div class="card-body">
+                            <h6 class="card-title">Operações Bem-sucedidas</h6>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h2 class="mb-0" id="success-count">0</h2>
+                                <i class="fas fa-trophy fa-2x opacity-50"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card text-white bg-danger shadow-sm">
+                        <div class="card-body">
+                            <h6 class="card-title">Stops Acionados</h6>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h2 class="mb-0" id="stop-count">0</h2>
+                                <i class="fas fa-exclamation-triangle fa-2x opacity-50"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card text-white bg-warning shadow-sm">
+                        <div class="card-body">
+                            <h6 class="card-title">Em Aberto</h6>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h2 class="mb-0" id="open-count">0</h2>
+                                <i class="fas fa-clock fa-2x opacity-50"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card text-white bg-info shadow-sm">
+                        <div class="card-body">
+                            <h6 class="card-title">Taxa de Acerto</h6>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h2 class="mb-0" id="win-rate">0%</h2>
+                                <i class="fas fa-chart-line fa-2x opacity-50"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Modal for Operation Details -->
+    <div class="modal fade" id="operationModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Detalhes da Operação</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="operation-details">
+                    <!-- Details will be loaded here -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                    <a href="#" class="btn btn-primary" id="download-pdf-btn" target="_blank">
+                        <i class="fas fa-download me-2"></i>Baixar PDF
+                    </a>
+                </div>
+            </div>
         </div>
     </div>
+
+    <!-- Footer -->
+    <footer class="mt-5 py-3 bg-white border-top">
+        <div class="container-fluid">
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <span class="text-muted">© 2024 Trading System. Dados fornecidos por Yahoo Finance.</span>
+                </div>
+                <div class="col-md-6 text-end">
+                    <span class="text-muted" id="connection-status">
+                        <i class="fas fa-circle text-success me-1"></i>Conectado
+                    </span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
+    <!-- Custom JS -->
     <script src="{{ url_for('static', filename='script.js') }}"></script>
-    <script src="{{ url_for('static', filename='realtime.js') }}"></script>
     
     <script>
-    // Gráfico inicial
-    var graphData = document.getElementById('graph').getAttribute('data-graph');
-    var graphs = JSON.parse(graphData);
-    var config = {
-        responsive: true,
-        displayModeBar: true,
-        displaylogo: false,
-        modeBarButtonsToRemove: ['sendDataToCloud']
-    };
-    Plotly.newPlot('graph', graphs.data, graphs.layout, config);
+        // Inline JavaScript for immediate functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            // Hide loading overlay
+            setTimeout(() => {
+                document.getElementById('loading-overlay').style.display = 'none';
+            }, 1000);
+            
+            // Navigation
+            document.querySelectorAll('[data-section]').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const section = this.getAttribute('data-section');
+                    
+                    // Update active nav link
+                    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Show selected section
+                    document.querySelectorAll('.section').forEach(s => {
+                        s.style.display = 'none';
+                        s.classList.remove('active');
+                    });
+                    
+                    document.getElementById(`${section}-section`).style.display = 'block';
+                    document.getElementById(`${section}-section`).classList.add('active');
+                });
+            });
+            
+            // Simple toast function
+            window.showToast = function(message, type = 'info') {
+                const toast = document.createElement('div');
+                toast.className = `toast show align-items-center text-bg-${type} border-0`;
+                toast.innerHTML = `
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            ${message}
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" 
+                                data-bs-dismiss="toast"></button>
+                    </div>
+                `;
+                document.getElementById('toast-container').appendChild(toast);
+                setTimeout(() => toast.remove(), 3000);
+            };
+        });
     </script>
-
 </body>
 </html>
