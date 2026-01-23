@@ -7,3 +7,5 @@ yfinance
 mplfinance
 flask-socketio 
 eventlet
+reportlab
+pandas_ta

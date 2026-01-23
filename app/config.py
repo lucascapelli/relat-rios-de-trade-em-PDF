@@ -1,9 +1,9 @@
 """Application configuration constants and helpers."""
 from __future__ import annotations
+import pandas as pd
 
 import os
 from pathlib import Path
-
 import pytz
 
 # Base directories
@@ -17,9 +17,24 @@ DB_PATH = PROJECT_ROOT / "database.db"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-# Timezone
+# Timezones (uso lógico apenas, nunca em índice de gráfico)
 BR_TZ = pytz.timezone("America/Sao_Paulo")
+UTC_TZ = pytz.UTC
 
+def normalize_datetime_index(df):
+    """
+    FORÇA DatetimeIndex para datetime64[ns] (naive).
+    Elimina qualquer tz, independente da origem.
+    """
+    if not hasattr(df, "index"):
+        return df
+
+    # força conversão total
+    df.index = pd.to_datetime(df.index, utc=True, errors="coerce")
+    df.index = df.index.tz_convert(None)
+    df.index = df.index.astype("datetime64[ns]")
+
+    return df
 # Price configuration
 TICK_SIZE_MAP = {
     "WIN": 5.0,
@@ -48,6 +63,8 @@ __all__ = [
     "CACHE_DIR",
     "DB_PATH",
     "BR_TZ",
+    "UTC_TZ",
+    "normalize_datetime_index",
     "TICK_SIZE_MAP",
     "DEFAULT_TICK_SIZE",
     "PLACEHOLDER_IMAGE_DATA_URL",

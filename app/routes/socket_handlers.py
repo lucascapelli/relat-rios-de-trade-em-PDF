@@ -6,6 +6,7 @@ import json
 import plotly
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
+from ..charts import ChartGenerator
 from ..models import asdict
 from ..services import Services
 from ..utils import logger
@@ -69,10 +70,13 @@ def register_socket_handlers(socketio: SocketIO, services: Services) -> None:
 				emit("chart_error", {"error": "Símbolo não informado"})
 				return
 
-			df = finance_data.get_candles(symbol, interval, 100)
-			fig = chart_generator.create_plotly_chart(df, f"{symbol} - {interval}")
-			candles_payload, series = _build_chart_components(df, limit=100)
-			source = df.attrs.get("source", "unknown")
+			df_raw = finance_data.get_candles(symbol, interval, 100)
+			df_norm = ChartGenerator.prepare_ohlc_dataframe(df_raw, interval)
+			df_norm = ChartGenerator._ensure_overlay_columns(df_norm)
+			payload_df = df_norm.reset_index().rename(columns={df_norm.index.name or "index": "time"})
+			fig = chart_generator.create_plotly_chart(df_norm, f"{symbol} - {interval}", timeframe=interval)
+			candles_payload, series = _build_chart_components(payload_df, limit=100)
+			source = df_norm.attrs.get("source", df_raw.attrs.get("source", "unknown"))
 
 			emit(
 				"chart_data",
@@ -83,9 +87,11 @@ def register_socket_handlers(socketio: SocketIO, services: Services) -> None:
 					"candles": candles_payload,
 					"series": series,
 					"indicators": {
-						"sma_9": float(df["SMA_9"].iloc[-1]) if "SMA_9" in df.columns else None,
-						"sma_21": float(df["SMA_21"].iloc[-1]) if "SMA_21" in df.columns else None,
-						"rsi": float(df["RSI"].iloc[-1]) if "RSI" in df.columns else None,
+						"sma_9": float(df_norm["SMA_9"].iloc[-1]) if "SMA_9" in df_norm.columns else None,
+						"sma_21": float(df_norm["SMA_21"].iloc[-1]) if "SMA_21" in df_norm.columns else None,
+						"ema_21": float(df_norm["EMA_21"].iloc[-1]) if "EMA_21" in df_norm.columns else None,
+						"ema_200": float(df_norm["EMA_200"].iloc[-1]) if "EMA_200" in df_norm.columns else None,
+						"rsi": float(df_norm["RSI"].iloc[-1]) if "RSI" in df_norm.columns else None,
 					},
 					"chart": json.loads(json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)),
 				},

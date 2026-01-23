@@ -10,6 +10,7 @@ import pandas as pd
 import plotly
 from flask import Blueprint, jsonify, render_template, request, send_from_directory
 
+from ..charts import ChartGenerator
 from ..config import PLACEHOLDER_IMAGE_DATA_URL, REPORTS_DIR
 from ..indicators import TechnicalNarrative
 from ..models import Operation, asdict
@@ -35,6 +36,8 @@ def _build_chart_components(df: pd.DataFrame, limit: int = 100) -> Tuple[List[Di
         "sma_21": "SMA_21",
         "ema_12": "EMA_12",
         "ema_26": "EMA_26",
+        "ema_21": "EMA_21",
+        "ema_200": "EMA_200",
         "rsi_series": "RSI",
         "bb_upper": "BB_upper",
         "bb_middle": "BB_middle",
@@ -104,7 +107,7 @@ def register_api_routes(app, services: Services) -> None:
 
         try:
             df = finance_data.get_candles("PETR4", "15m", 50)
-            fig = chart_generator.create_plotly_chart(df, "PETR4 - 15 Minutos")
+            fig = chart_generator.create_plotly_chart(df, "PETR4 - 15 Minutos", timeframe="15m")
             graph_json = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         except Exception as exc:
             logger.error(f"Erro no gráfico inicial: {exc}")
@@ -128,12 +131,22 @@ def register_api_routes(app, services: Services) -> None:
     @bp.route("/api/chart/<symbol>/<interval>")
     def api_chart(symbol: str, interval: str):
         try:
-            df = finance_data.get_candles(symbol, interval, 100)
-            fig = chart_generator.create_plotly_chart(df, f"{symbol} - {interval}")
+            df_raw = finance_data.get_candles(symbol, interval, 100)
+            df_norm = ChartGenerator.prepare_ohlc_dataframe(df_raw, interval)
+            df_norm = ChartGenerator._ensure_overlay_columns(df_norm)
+            payload_df = df_norm.reset_index().rename(columns={df_norm.index.name or "index": "time"})
+            date_format = ChartGenerator._get_date_format(interval)
+            if "time" in payload_df.columns:
+                try:
+                    payload_df["time_str"] = payload_df["time"].dt.strftime(date_format)
+                except Exception:
+                    payload_df["time_str"] = payload_df["time"].astype(str)
 
-            candles_payload, series = _build_chart_components(df, limit=100)
+            fig = chart_generator.create_plotly_chart(df_norm, f"{symbol} - {interval}", timeframe=interval)
 
-            source = df.attrs.get("source", "unknown")
+            candles_payload, series = _build_chart_components(payload_df, limit=100)
+
+            source = df_norm.attrs.get("source", df_raw.attrs.get("source", "unknown"))
             if candles_payload:
                 last_candle = candles_payload[-1]
                 last_open = float(last_candle.get("open", 0) or 0)
@@ -146,9 +159,11 @@ def register_api_routes(app, services: Services) -> None:
                 logger.warning(f"/api/chart {symbol}/{interval} -> source={source} sem candles retornados")
 
             indicators_snapshot = {
-                "sma_9": float(df["SMA_9"].iloc[-1]) if "SMA_9" in df.columns else None,
-                "sma_21": float(df["SMA_21"].iloc[-1]) if "SMA_21" in df.columns else None,
-                "rsi": float(df["RSI"].iloc[-1]) if "RSI" in df.columns else None,
+                "sma_9": float(df_norm["SMA_9"].iloc[-1]) if "SMA_9" in df_norm.columns else None,
+                "sma_21": float(df_norm["SMA_21"].iloc[-1]) if "SMA_21" in df_norm.columns else None,
+                "ema_21": float(df_norm["EMA_21"].iloc[-1]) if "EMA_21" in df_norm.columns else None,
+                "ema_200": float(df_norm["EMA_200"].iloc[-1]) if "EMA_200" in df_norm.columns else None,
+                "rsi": float(df_norm["RSI"].iloc[-1]) if "RSI" in df_norm.columns else None,
             }
 
             return jsonify(
@@ -243,7 +258,8 @@ def register_api_routes(app, services: Services) -> None:
                     operation.status = "STOP ATINGIDO"
 
             preferred_timeframes: List[str] = []
-            base_timeframes = ["15m", "1h", "1d", "1w"]
+            # 15m como timeframe principal; 6m entra como confirmação
+            base_timeframes = ["15m", "6m", "1h", "1d", "1w"]
             if operation.timeframe and operation.timeframe not in base_timeframes:
                 preferred_timeframes.append(operation.timeframe)
             for candidate in base_timeframes:
@@ -279,6 +295,7 @@ def register_api_routes(app, services: Services) -> None:
                 img = chart_generator.generate_chart_image(
                     df,
                     f"{operation.symbol} - {tf}",
+                    timeframe=tf,
                     operation=operation,
                 )
 
@@ -315,6 +332,7 @@ def register_api_routes(app, services: Services) -> None:
                 fallback_img = chart_generator.generate_chart_image(
                     fallback_df,
                     f"{operation.symbol} - {operation.timeframe}",
+                    timeframe=operation.timeframe,
                     operation=operation,
                 )
                 fallback_row = fallback_df.iloc[-1] if len(fallback_df.index) > 0 else None

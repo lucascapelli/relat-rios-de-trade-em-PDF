@@ -358,6 +358,34 @@ class TradingApp {
             });
         }
 
+        if (Array.isArray(series.ema_21)) {
+            traces.push({
+                type: 'scatter',
+                mode: 'lines',
+                x: resolvedXAxis,
+                y: series.ema_21,
+                name: 'MME 21',
+                line: { color: '#1E88E5', width: 1.6, dash: 'dot' },
+                opacity: 0.95,
+                hoverinfo: 'skip',
+                hovertemplate: 'MME 21: R$ %{y:.2f}<extra></extra>'
+            });
+        }
+
+        if (Array.isArray(series.ema_200)) {
+            traces.push({
+                type: 'scatter',
+                mode: 'lines',
+                x: resolvedXAxis,
+                y: series.ema_200,
+                name: 'MME 200',
+                line: { color: '#D32F2F', width: 1.8, dash: 'dot' },
+                opacity: 0.95,
+                hoverinfo: 'skip',
+                hovertemplate: 'MME 200: R$ %{y:.2f}<extra></extra>'
+            });
+        }
+
         if (Array.isArray(series.bb_upper) && Array.isArray(series.bb_middle) && Array.isArray(series.bb_lower)) {
             traces.push({
                 type: 'scatter',
@@ -601,45 +629,64 @@ class TradingApp {
     
     updateIndicators(indicators) {
         const panel = document.getElementById('indicators-panel');
-        panel.innerHTML = `
-            <div class="col-md-3">
-                <div class="card bg-light">
-                    <div class="card-body text-center">
-                        <small class="text-muted">SMA 9</small>
-                        <div class="h5">${indicators.sma_9 ? indicators.sma_9.toFixed(2) : 'N/A'}</div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card bg-light">
-                    <div class="card-body text-center">
-                        <small class="text-muted">SMA 21</small>
-                        <div class="h5">${indicators.sma_21 ? indicators.sma_21.toFixed(2) : 'N/A'}</div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card bg-light">
-                    <div class="card-body text-center">
-                        <small class="text-muted">RSI</small>
-                        <div class="h5 ${indicators.rsi > 70 ? 'text-danger' : indicators.rsi < 30 ? 'text-success' : ''}">
-                            ${indicators.rsi ? indicators.rsi.toFixed(2) : 'N/A'}
+        const cards = [
+            {
+                label: 'SMA 9',
+                value: indicators.sma_9,
+            },
+            {
+                label: 'SMA 21',
+                value: indicators.sma_21,
+            },
+            {
+                label: 'MME 21',
+                value: indicators.ema_21,
+            },
+            {
+                label: 'MME 200',
+                value: indicators.ema_200,
+            },
+            {
+                label: 'RSI',
+                value: indicators.rsi,
+                formatter: (val) => (this.isValidNumber(val) ? val.toFixed(2) : 'N/A'),
+                extraClass: indicators.rsi > 70 ? 'text-danger' : (indicators.rsi < 30 ? 'text-success' : ''),
+            },
+            {
+                label: 'Trend',
+                value: indicators.sma_9 && indicators.sma_21
+                    ? (indicators.sma_9 > indicators.sma_21 ? '📈 Alta' : '📉 Baixa')
+                    : 'N/A',
+                formatter: (val) => val,
+            }
+        ];
+
+        panel.innerHTML = cards.map((card) => {
+            const formatter = card.formatter || ((val) => this.formatIndicator(val));
+            const displayValue = formatter(card.value);
+            const extraClass = card.extraClass ? ` ${card.extraClass}` : '';
+            return `
+                <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6 mb-3">
+                    <div class="card bg-light h-100">
+                        <div class="card-body text-center">
+                            <small class="text-muted">${card.label}</small>
+                            <div class="h5${extraClass}">${displayValue}</div>
                         </div>
                     </div>
                 </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card bg-light">
-                    <div class="card-body text-center">
-                        <small class="text-muted">Trend</small>
-                        <div class="h5">
-                            ${indicators.sma_9 && indicators.sma_21 ? 
-                                (indicators.sma_9 > indicators.sma_21 ? '📈 Alta' : '📉 Baixa') : 'N/A'}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
+            `;
+        }).join('');
+    }
+
+    formatIndicator(value) {
+        if (!this.isValidNumber(value)) {
+            return 'N/A';
+        }
+        return Number(value).toFixed(2);
+    }
+
+    isValidNumber(value) {
+        return value !== null && value !== undefined && !Number.isNaN(value);
     }
     
     updateCurrentPrice(candle) {

@@ -76,6 +76,8 @@ class TechnicalNarrative:
         if not tf:
             return ""
         mapping = {
+            "6min": "6m",
+            "6m": "6m",
             "15min": "15m",
             "15": "15m",
             "60min": "1h",
@@ -94,6 +96,7 @@ class TechnicalNarrative:
     @staticmethod
     def _label_for(tf: str) -> str:
         labels = {
+            "6m": "6M",
             "15m": "15M",
             "1h": "60M",
             "1d": "DIÁRIO",

@@ -102,14 +102,22 @@ class FinanceData:
 
     def get_candles(self, symbol: str, interval: str = "15m", periods: int = 100) -> pd.DataFrame:
         try:
+            interval_norm = str(interval).strip().lower()
             symbol_yf = f"{symbol}.SA" if not symbol.endswith(".SA") and symbol[-1].isdigit() else symbol
-            df = self._fetch_yfinance_data(symbol_yf, interval, periods)
+            df = self._fetch_yfinance_data(symbol_yf, interval_norm, periods)
 
             if df is None or df.empty:
                 logger.warning(f"Sem dados reais para {symbol} ({interval}), usando fallback")
                 return self._generate_fallback_data(symbol, interval, periods, reason="fallback_no_data")
 
             df = self._process_candle_data(df, symbol_yf, periods)
+
+            if interval_norm in {"6m", "6min"}:
+                df = self._resample_ohlc(df, "6min")
+                if len(df) > periods:
+                    df = df.iloc[-periods:]
+                df["time"] = df.index
+                df["time_str"] = df["time"].dt.strftime("%Y-%m-%d %H:%M:%S")
             df = self.indicators.calculate_all(df)
 
             valid = df[["open", "high", "low", "close"]].dropna()
@@ -130,10 +138,13 @@ class FinanceData:
     def _fetch_yfinance_data(self, symbol: str, interval: str, periods: int) -> Optional[pd.DataFrame]:
         interval_map = {
             "1m": ("1m", "1d"),
+            "6m": ("1m", "7d"),
+            "6min": ("1m", "7d"),
             "5m": ("5m", "5d"),
             "15m": ("15m", "5d"),
             "30m": ("30m", "10d"),
             "1h": ("60m", "30d"),
+            "60m": ("60m", "30d"),
             "1d": ("1d", "3mo"),
             "1w": ("1wk", "2y"),
             "15min": ("15m", "5d"),
@@ -150,6 +161,23 @@ class FinanceData:
         except Exception as exc:
             logger.error(f"Erro yfinance para {symbol}: {exc}")
             return None
+
+    @staticmethod
+    def _resample_ohlc(df: pd.DataFrame, rule: str) -> pd.DataFrame:
+        required = {"open", "high", "low", "close"}
+        if df is None or df.empty or not required.issubset(df.columns):
+            return df
+
+        agg = {
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+        }
+        if "volume" in df.columns:
+            agg["volume"] = "sum"
+
+        return df.resample(rule).agg(agg).dropna(subset=["open", "high", "low", "close"])
 
     def _process_candle_data(self, df: pd.DataFrame, symbol: str, periods: int) -> pd.DataFrame:
         df = df.rename(
