@@ -17,6 +17,7 @@ class TradingApp {
         this.subscribedSymbols = new Set();
         this.socketSubscriptions = new Set();
         this.operations = [];
+        this.lastDataSource = null;
         
         this.init();
     }
@@ -39,6 +40,46 @@ class TradingApp {
         }, 1000);
     }
     
+    inferTickSize(symbol) {
+        const clean = (symbol || '').toUpperCase();
+        if (clean.startsWith('WIN') || clean.startsWith('IND')) {
+            return 5;
+        }
+        if (clean.startsWith('WDO') || clean.startsWith('DOL')) {
+            return 0.5;
+        }
+        return 0.01;
+    }
+
+    formatCurrency(value) {
+        if (typeof value !== 'number' || Number.isNaN(value)) {
+            return 'R$ -';
+        }
+        return `R$ ${value.toFixed(2)}`;
+    }
+
+    formatTicks(value) {
+        if (typeof value !== 'number' || Number.isNaN(value)) {
+            return '-';
+        }
+        return `${value.toFixed(1)} ticks`;
+    }
+
+    sanitizeNumber(value) {
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    computeDirectionalTicks(tipo, referencia, priceLevel, tickSize) {
+        if (!Number.isFinite(referencia) || !Number.isFinite(priceLevel) || !Number.isFinite(tickSize) || tickSize <= 0) {
+            return 0;
+        }
+        const isCompra = (tipo || 'COMPRA').toUpperCase() === 'COMPRA';
+        const diff = isCompra ? (priceLevel - referencia) : (referencia - priceLevel);
+        const ticks = diff / tickSize;
+        return Number.isFinite(ticks) ? Math.abs(ticks) : 0;
+    }
+
     initSocket() {
         // Connect to WebSocket server
         this.socket = io();
@@ -151,6 +192,9 @@ class TradingApp {
     async loadChart(symbol, interval) {
         try {
             const normalizedSymbol = (symbol || '').toUpperCase();
+            if (interval && interval !== this.currentInterval) {
+                this.currentInterval = interval;
+            }
             const response = await fetch(`/api/chart/${normalizedSymbol}/${interval}`);
             const data = await response.json();
             
@@ -164,8 +208,16 @@ class TradingApp {
             const chartTitle = `${activeSymbol} - ${this.getIntervalName(interval)}`;
             this.lastChartTitle = chartTitle;
 
-            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'main-chart', chartTitle);
-            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', chartTitle);
+            const sourceKey = (data.source || '').toLowerCase();
+            if (sourceKey && sourceKey !== this.lastDataSource) {
+                if (sourceKey !== 'yfinance') {
+                    this.showToast(`Dados alternativos (${sourceKey}) carregados para ${activeSymbol}.`, 'warning');
+                }
+                this.lastDataSource = sourceKey;
+            }
+
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'main-chart', chartTitle, interval);
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', chartTitle, interval);
             this.updateIndicators(this.lastIndicators);
             if (Array.isArray(data.candles) && data.candles.length > 0) {
                 this.updateCurrentPrice(data.candles[data.candles.length - 1]);
@@ -197,7 +249,7 @@ class TradingApp {
         }
     }
     
-    renderSeriesChart(series, indicators, containerId, title) {
+    renderSeriesChart(series, indicators, containerId, title, interval = this.currentInterval) {
         if (!series || !series.open || !series.open.length) {
             console.warn('Série vazia para renderização do gráfico', series);
             return;
@@ -208,10 +260,28 @@ class TradingApp {
             return;
         }
 
-        const xAxis = series.time_str || series.time;
+        const timeValues = Array.isArray(series.time) && series.time.length > 0
+            ? series.time
+            : (Array.isArray(series.time_str) ? series.time_str : []);
+
+        const xAxis = timeValues.map((value, index) => {
+            const parsed = this.parseDateValue(value);
+            if (parsed) {
+                return parsed;
+            }
+            const fallback = Array.isArray(series.time)
+                ? this.parseDateValue(series.time[index])
+                : (Array.isArray(series.time_str) ? this.parseDateValue(series.time_str[index]) : null);
+            return fallback || value;
+        });
+
+        const resolvedXAxis = xAxis.length === series.open.length
+            ? xAxis
+            : series.open.map((_, idx) => (xAxis[idx] !== undefined ? xAxis[idx] : idx));
+
         const candlestickTrace = {
             type: 'candlestick',
-            x: xAxis,
+            x: resolvedXAxis,
             open: series.open,
             high: series.high,
             low: series.low,
@@ -226,7 +296,14 @@ class TradingApp {
                 fillcolor: '#ef5350'
             },
             whiskerwidth: 0.8,
-            hoverinfo: 'x+open+high+low+close'
+            hoverinfo: 'skip',
+            hovertemplate: [
+                '<b>%{x|%d/%m/%Y %H:%M}</b><br>',
+                'Abertura: R$ %{open:.2f}<br>',
+                'Máxima: R$ %{high:.2f}<br>',
+                'Mínima: R$ %{low:.2f}<br>',
+                'Fechamento: R$ %{close:.2f}<extra></extra>'
+            ].join('')
         };
 
         const traces = [candlestickTrace];
@@ -234,7 +311,7 @@ class TradingApp {
         if (Array.isArray(series.volume)) {
             traces.push({
                 type: 'bar',
-                x: xAxis,
+                x: resolvedXAxis,
                 y: series.volume,
                 name: 'Volume',
                 marker: {
@@ -245,7 +322,11 @@ class TradingApp {
                 },
                 opacity: 0.7,
                 yaxis: 'y2',
-                hoverinfo: 'x+y'
+                hoverinfo: 'skip',
+                hovertemplate: [
+                    '<b>%{x|%d/%m/%Y %H:%M}</b><br>',
+                    'Volume: %{y:,0f}<extra></extra>'
+                ].join('')
             });
         }
 
@@ -253,11 +334,13 @@ class TradingApp {
             traces.push({
                 type: 'scatter',
                 mode: 'lines',
-                x: xAxis,
+                x: resolvedXAxis,
                 y: series.sma_9,
                 name: 'SMA 9',
                 line: { color: '#2196F3', width: 1.5 },
-                opacity: 0.7
+                opacity: 0.7,
+                hoverinfo: 'skip',
+                hovertemplate: 'SMA 9: R$ %{y:.2f}<extra></extra>'
             });
         }
 
@@ -265,11 +348,13 @@ class TradingApp {
             traces.push({
                 type: 'scatter',
                 mode: 'lines',
-                x: xAxis,
+                x: resolvedXAxis,
                 y: series.sma_21,
                 name: 'SMA 21',
                 line: { color: '#FF9800', width: 1.5 },
-                opacity: 0.7
+                opacity: 0.7,
+                hoverinfo: 'skip',
+                hovertemplate: 'SMA 21: R$ %{y:.2f}<extra></extra>'
             });
         }
 
@@ -277,22 +362,24 @@ class TradingApp {
             traces.push({
                 type: 'scatter',
                 mode: 'lines',
-                x: xAxis,
+                x: resolvedXAxis,
                 y: series.bb_upper,
                 name: 'BB Superior',
                 line: { color: 'rgba(158, 158, 158, 0.5)', width: 1, dash: 'dash' },
-                showlegend: false
+                showlegend: false,
+                hoverinfo: 'skip'
             });
             traces.push({
                 type: 'scatter',
                 mode: 'lines',
-                x: xAxis,
+                x: resolvedXAxis,
                 y: series.bb_lower,
                 name: 'BB Inferior',
                 line: { color: 'rgba(158, 158, 158, 0.5)', width: 1, dash: 'dash' },
                 fill: 'tonexty',
                 fillcolor: 'rgba(158, 158, 158, 0.1)',
-                showlegend: false
+                showlegend: false,
+                hoverinfo: 'skip'
             });
         }
 
@@ -332,7 +419,8 @@ class TradingApp {
                 side: 'right',
                 tickformat: '.2f',
                 tickprefix: 'R$ ',
-                tickfont: { size: 10 }
+                tickfont: { size: 10 },
+                autorange: true
             },
             yaxis2: {
                 title: 'Volume',
@@ -340,7 +428,8 @@ class TradingApp {
                 side: 'left',
                 showgrid: false,
                 tickformat: ',.0f',
-                tickfont: { size: 9 }
+                tickfont: { size: 9 },
+                autorange: true
             },
             height: 550,
             margin: { l: 50, r: 60, t: 70, b: 50 },
@@ -359,11 +448,88 @@ class TradingApp {
             font: { family: 'Arial, sans-serif' }
         };
 
+        layout.xaxis = {
+            ...layout.xaxis,
+            autorange: true
+        };
+
+        this.applyAxisFormats(layout, interval);
+
         if (this.charts[containerId]) {
             Plotly.react(container, traces, layout, this.chartConfig);
         } else {
             Plotly.newPlot(container, traces, layout, this.chartConfig);
             this.charts[containerId] = true;
+        }
+    }
+
+    parseDateValue(value) {
+        if (!value) {
+            return null;
+        }
+        if (value instanceof Date && !Number.isNaN(value.valueOf())) {
+            return value;
+        }
+
+        const raw = value;
+        let parsed = new Date(raw);
+        if (!Number.isNaN(parsed.valueOf())) {
+            return parsed;
+        }
+
+        if (typeof raw === 'string') {
+            const isoCandidate = raw.includes('T') ? raw : raw.replace(' ', 'T');
+            parsed = new Date(isoCandidate);
+            if (!Number.isNaN(parsed.valueOf())) {
+                return parsed;
+            }
+
+            parsed = new Date(`${isoCandidate}Z`);
+            if (!Number.isNaN(parsed.valueOf())) {
+                return parsed;
+            }
+        }
+
+        return null;
+    }
+
+    applyAxisFormats(layout, interval) {
+        if (!layout || !layout.xaxis) {
+            return;
+        }
+
+        const normalized = (interval || '').toLowerCase();
+        const intraday = ['1m', '5m', '15m', '30m', '1h'].includes(normalized);
+        const daily = normalized === '1d' || normalized === 'diario';
+        const weekly = normalized === '1w' || normalized === 'semanal';
+
+        if (intraday) {
+            layout.xaxis.tickformat = '%d/%m %H:%M';
+            layout.xaxis.hoverformat = '%d/%m %H:%M';
+            layout.xaxis.tickformatstops = [
+                { dtickrange: [null, 60 * 60 * 1000], value: '%H:%M' },
+                { dtickrange: [60 * 60 * 1000, 24 * 60 * 60 * 1000], value: '%d/%m %H:%M' },
+                { dtickrange: [24 * 60 * 60 * 1000, null], value: '%d/%m' }
+            ];
+        } else if (daily) {
+            layout.xaxis.tickformat = '%d/%m';
+            layout.xaxis.hoverformat = '%d/%m/%Y';
+            layout.xaxis.tickformatstops = [
+                { dtickrange: [null, 7 * 24 * 60 * 60 * 1000], value: '%d/%m' },
+                { dtickrange: [7 * 24 * 60 * 60 * 1000, null], value: '%d/%m/%Y' }
+            ];
+        } else if (weekly) {
+            layout.xaxis.tickformat = '%d/%m/%Y';
+            layout.xaxis.hoverformat = '%d/%m/%Y';
+            layout.xaxis.tickformatstops = [
+                { dtickrange: [null, null], value: '%d/%m/%Y' }
+            ];
+        } else {
+            layout.xaxis.tickformat = '%d/%m/%Y';
+            layout.xaxis.hoverformat = '%d/%m/%Y';
+            layout.xaxis.tickformatstops = [
+                { dtickrange: [null, null], value: '%d/%m/%Y' }
+            ];
         }
     }
 
@@ -505,37 +671,53 @@ class TradingApp {
         
         this.operations.forEach(op => {
             const row = document.createElement('tr');
-            row.className = `operation-card ${op.status.toLowerCase().replace(' ', '-')}`;
+            const statusClass = (op.status || '').toLowerCase().replace(/\s+/g, '-');
+            row.className = `operation-card ${statusClass}`;
+
+            const symbol = op.symbol || '-';
+            const faixa = (op.entrada_min !== null && op.entrada_min !== undefined &&
+                           op.entrada_max !== null && op.entrada_max !== undefined)
+                ? `${this.formatCurrency(Math.min(op.entrada_min, op.entrada_max))} · ${this.formatCurrency(Math.max(op.entrada_min, op.entrada_max))}`
+                : '-';
+
+            const parcialInfo = (op.parcial_preco !== null && op.parcial_preco !== undefined)
+                ? `${this.formatCurrency(op.parcial_preco)} | ${this.formatTicks(op.parcial_pontos)}`
+                : '-';
+
+            const alvoInfo = `${this.formatCurrency(op.alvo)} | ${this.formatTicks(op.pontos_alvo)}`;
+            const stopInfo = `${this.formatCurrency(op.stop)} | ${this.formatTicks(op.pontos_stop)}`;
+            const createdAt = op.created_at ? new Date(op.created_at).toLocaleDateString('pt-BR') : '-';
+            const pdfIcon = op.pdf_path ? '<i class="fas fa-file-pdf ms-1 text-danger" title="Possui PDF"></i>' : '';
+
             row.innerHTML = `
                 <td>${op.id}</td>
                 <td>
-                    <strong>${op.symbol}</strong>
-                    ${op.pdf_path ? 
-                        '<i class="fas fa-file-pdf ms-1 text-danger" title="Possui PDF"></i>' : ''}
+                    <strong>${symbol}</strong>
+                    ${pdfIcon}
                 </td>
                 <td>
-                    <span class="badge ${op.tipo === 'COMPRA' ? 'bg-success' : 'bg-danger'}">
-                        ${op.tipo}
+                    <span class="badge ${(op.tipo || '').toUpperCase() === 'COMPRA' ? 'bg-success' : 'bg-danger'}">
+                        ${(op.tipo || '').toUpperCase()}
                     </span>
                 </td>
-                <td>R$ ${op.entrada.toFixed(2)}</td>
-                <td>R$ ${op.stop.toFixed(2)}</td>
-                <td>R$ ${op.alvo.toFixed(2)}</td>
-                <td>${op.quantidade}</td>
+                <td>${this.formatCurrency(op.entrada)}</td>
+                <td>${faixa}</td>
+                <td>${parcialInfo}</td>
+                <td>${alvoInfo}</td>
+                <td>${stopInfo}</td>
+                <td>${op.quantidade || 0}</td>
                 <td>
                     <span class="badge ${this.getStatusBadgeClass(op.status)}">
-                        ${op.status}
+                        ${op.status || 'ABERTA'}
                     </span>
                 </td>
-                <td>${new Date(op.created_at).toLocaleDateString('pt-BR')}</td>
+                <td>${createdAt}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary view-operation" 
-                            data-id="${op.id}">
+                    <button class="btn btn-sm btn-outline-primary view-operation" data-id="${op.id}">
                         <i class="fas fa-eye"></i>
                     </button>
                     ${op.pdf_path ? `
-                    <a href="/reports/${op.pdf_path.split('/').pop()}" 
-                       class="btn btn-sm btn-outline-danger" target="_blank">
+                    <a href="/reports/${op.pdf_path.split('/').pop()}" class="btn btn-sm btn-outline-danger" target="_blank">
                         <i class="fas fa-file-pdf"></i>
                     </a>
                     ` : ''}
@@ -584,39 +766,50 @@ class TradingApp {
     
     updateStatistics() {
         const total = this.operations.length;
-        const success = this.operations.filter(op => op.status.includes('ALVO')).length;
-        const stops = this.operations.filter(op => op.status.includes('STOP')).length;
-        const open = this.operations.filter(op => op.status === 'ABERTA').length;
-        
+        const success = this.operations.filter(op => (op.status || '').includes('ALVO')).length;
+        const stops = this.operations.filter(op => (op.status || '').includes('STOP')).length;
+        const open = this.operations.filter(op => (op.status || '') === 'ABERTA').length;
+
         document.getElementById('stats-operations').textContent = total;
         document.getElementById('success-count').textContent = success;
         document.getElementById('stop-count').textContent = stops;
         document.getElementById('open-count').textContent = open;
-        
-        const winRate = total > 0 ? ((success / (success + stops)) * 100).toFixed(1) : 0;
+
+        const closed = success + stops;
+        const winRate = closed > 0 ? ((success / closed) * 100).toFixed(1) : 0;
         document.getElementById('win-rate').textContent = `${winRate}%`;
         document.getElementById('stats-winrate').textContent = `${winRate}%`;
-        
-        // Calculate profit/loss (simplified)
+
         let profit = 0;
         this.operations.forEach(op => {
-            if (op.status.includes('ALVO')) {
-                profit += (op.alvo - op.entrada) * op.quantidade;
-            } else if (op.status.includes('STOP')) {
-                profit += (op.stop - op.entrada) * op.quantidade;
+            const qty = Number(op.quantidade) || 0;
+            if (!qty) {
+                return;
+            }
+            const entrada = Number(op.entrada) || 0;
+            const alvo = Number(op.alvo) || 0;
+            const stop = Number(op.stop) || 0;
+            const tipo = (op.tipo || 'COMPRA').toUpperCase();
+            const targetDiff = tipo === 'COMPRA' ? (alvo - entrada) : (entrada - alvo);
+            const stopDiff = tipo === 'COMPRA' ? (entrada - stop) : (stop - entrada);
+
+            if ((op.status || '').includes('ALVO')) {
+                profit += Math.max(targetDiff, 0) * qty;
+            } else if ((op.status || '').includes('STOP')) {
+                profit -= Math.max(stopDiff, 0) * qty;
             }
         });
-        
-        document.getElementById('stats-profit').textContent = 
-            `R$ ${profit.toFixed(2)}`;
-        document.getElementById('stats-assets').textContent = 
+
+        document.getElementById('stats-profit').textContent = this.formatCurrency(profit);
+        document.getElementById('stats-assets').textContent =
             new Set(this.operations.map(op => op.symbol)).size;
     }
     
     getStatusBadgeClass(status) {
-        if (status.includes('ALVO')) return 'bg-success';
-        if (status.includes('STOP')) return 'bg-danger';
-        if (status === 'ABERTA') return 'bg-warning';
+        const normalized = (status || '').toUpperCase();
+        if (normalized.includes('ALVO')) return 'bg-success';
+        if (normalized.includes('STOP')) return 'bg-danger';
+        if (normalized === 'ABERTA') return 'bg-warning';
         return 'bg-secondary';
     }
     
@@ -745,13 +938,25 @@ class TradingApp {
                 return;
             }
 
+            if (data.interval && data.interval !== this.currentInterval) {
+                this.currentInterval = data.interval;
+            }
+
             this.lastSeries = data.series;
             this.lastIndicators = data.indicators || this.lastIndicators;
             const title = `${data.symbol} - ${this.getIntervalName(data.interval)}`;
             this.lastChartTitle = title;
 
-            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', title);
-            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'main-chart', title);
+            const sourceKey = (data.source || '').toLowerCase();
+            if (sourceKey && sourceKey !== this.lastDataSource) {
+                if (sourceKey !== 'yfinance') {
+                    this.showToast(`Dados alternativos (${sourceKey}) carregados para ${data.symbol}.`, 'warning');
+                }
+                this.lastDataSource = sourceKey;
+            }
+
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', title, data.interval);
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'main-chart', title, data.interval);
             if (this.lastIndicators) {
                 this.updateIndicators(this.lastIndicators);
             }
@@ -767,7 +972,7 @@ class TradingApp {
             this.updateSymbolButtons(this.currentSymbol);
             this.syncSymbolInputs(this.currentSymbol);
             if (this.lastSeries) {
-                this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', this.lastChartTitle);
+                this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', this.lastChartTitle, this.currentInterval);
                 this.resizeChart('analysis-chart');
             } else {
                 this.loadChart(this.currentSymbol, this.currentInterval);
@@ -791,31 +996,85 @@ class TradingApp {
         const operation = this.operations.find(op => op.id == operationId);
         if (!operation) return;
         
+        const parseNumber = (value) => {
+            if (value === null || value === undefined) {
+                return null;
+            }
+            const num = Number(value);
+            return Number.isFinite(num) ? num : null;
+        };
+
+        const entradaValue = parseNumber(operation.entrada);
+        const stopValue = parseNumber(operation.stop);
+        const alvoValue = parseNumber(operation.alvo);
+        const entradaMinValue = parseNumber(operation.entrada_min);
+        const entradaMaxValue = parseNumber(operation.entrada_max);
+        const parcialValue = parseNumber(operation.parcial_preco);
+        const ticksParcialValue = parseNumber(operation.parcial_pontos);
+        const ticksAlvoValue = parseNumber(operation.pontos_alvo);
+        const ticksStopValue = parseNumber(operation.pontos_stop);
+        const tickSizeValue = parseNumber(operation.tick_size);
+        const riscoRetornoValue = parseNumber(operation.risco_retorno);
+        const qtyValue = parseNumber(operation.quantidade);
+        const qtyNumber = qtyValue !== null ? qtyValue : 0;
+        const precoAtualValue = parseNumber(operation.preco_atual);
+
+        const faixaEntrada = (entradaMinValue !== null && entradaMaxValue !== null)
+            ? `${this.formatCurrency(Math.min(entradaMinValue, entradaMaxValue))} · ${this.formatCurrency(Math.max(entradaMinValue, entradaMaxValue))}`
+            : '-';
+        const parcialDisplay = parcialValue !== null
+            ? `${this.formatCurrency(parcialValue)} | ${ticksParcialValue !== null ? `${ticksParcialValue.toFixed(1)} ticks` : '-'}`
+            : '-';
+        const alvoDisplay = `${this.formatCurrency(alvoValue)} | ${ticksAlvoValue !== null ? `${ticksAlvoValue.toFixed(1)} ticks` : '-'}`;
+        const stopDisplay = `${this.formatCurrency(stopValue)} | ${ticksStopValue !== null ? `${ticksStopValue.toFixed(1)} ticks` : '-'}`;
+        const tickSizeDisplay = tickSizeValue !== null ? `${tickSizeValue.toFixed(2)} pontos` : '-';
+        const riskRewardText = riscoRetornoValue !== null ? `${riscoRetornoValue.toFixed(2)}:1` : '-';
+        const nocionalValue = (entradaValue !== null && qtyValue !== null) ? entradaValue * qtyNumber : null;
+        const riskTotalValue = (ticksStopValue !== null && tickSizeValue !== null && qtyValue !== null)
+            ? ticksStopValue * tickSizeValue * qtyNumber
+            : null;
+        const potentialValue = (ticksAlvoValue !== null && tickSizeValue !== null && qtyValue !== null)
+            ? ticksAlvoValue * tickSizeValue * qtyNumber
+            : null;
+        const nocionalDisplay = nocionalValue !== null ? this.formatCurrency(nocionalValue) : 'R$ -';
+        const riskTotalDisplay = riskTotalValue !== null ? this.formatCurrency(riskTotalValue) : 'R$ -';
+        const potentialDisplay = potentialValue !== null ? this.formatCurrency(potentialValue) : 'R$ -';
+        const statusText = operation.status || 'ABERTA';
+        const createdAtText = operation.created_at ? new Date(operation.created_at).toLocaleString('pt-BR') : '-';
+        const directionText = (operation.tipo || 'COMPRA').toUpperCase();
+        const directionClass = directionText === 'COMPRA' ? 'bg-success' : 'bg-danger';
+
         const modalBody = document.getElementById('operation-details');
         modalBody.innerHTML = `
             <div class="row">
                 <div class="col-md-6">
-                    <h6>Informações da Operação</h6>
+                    <h6>Execução</h6>
                     <table class="table table-sm">
-                        <tr><th>Ativo:</th><td>${operation.symbol}</td></tr>
-                        <tr><th>Tipo:</th><td>${operation.tipo}</td></tr>
-                        <tr><th>Entrada:</th><td>R$ ${operation.entrada.toFixed(2)}</td></tr>
-                        <tr><th>Stop:</th><td>R$ ${operation.stop.toFixed(2)}</td></tr>
-                        <tr><th>Alvo:</th><td>R$ ${operation.alvo.toFixed(2)}</td></tr>
-                        <tr><th>Quantidade:</th><td>${operation.quantidade}</td></tr>
-                        <tr><th>Status:</th><td><span class="badge ${this.getStatusBadgeClass(operation.status)}">${operation.status}</span></td></tr>
-                        <tr><th>Data:</th><td>${new Date(operation.created_at).toLocaleString('pt-BR')}</td></tr>
+                        <tr><th>Ativo:</th><td>${operation.symbol || '-'}</td></tr>
+                        <tr><th>Direção:</th><td><span class="badge ${directionClass}">${directionText}</span></td></tr>
+                        <tr><th>Timeframe:</th><td>${(operation.timeframe || '').toUpperCase() || '-'}</td></tr>
+                        <tr><th>Faixa de entrada:</th><td>${faixaEntrada}</td></tr>
+                        <tr><th>Entrada guia:</th><td>${this.formatCurrency(entradaValue)}</td></tr>
+                        <tr><th>Saída parcial:</th><td>${parcialDisplay}</td></tr>
+                        <tr><th>Alvo final:</th><td>${alvoDisplay}</td></tr>
+                        <tr><th>Stop loss:</th><td>${stopDisplay}</td></tr>
+                        <tr><th>Tick size:</th><td>${tickSizeDisplay}</td></tr>
+                        <tr><th>Risco/Retorno:</th><td>${riskRewardText}</td></tr>
                     </table>
                 </div>
                 <div class="col-md-6">
-                    <h6>Análise</h6>
+                    <h6>Métricas</h6>
                     <table class="table table-sm">
-                        <tr><th>Pontos Alvo:</th><td>${(operation.alvo - operation.entrada).toFixed(2)}</td></tr>
-                        <tr><th>Pontos Stop:</th><td>${(operation.entrada - operation.stop).toFixed(2)}</td></tr>
-                        <tr><th>Risco/Retorno:</th><td>${((operation.alvo - operation.entrada) / (operation.entrada - operation.stop)).toFixed(2)}:1</td></tr>
-                        <tr><th>Valor Total:</th><td>R$ ${(operation.entrada * operation.quantidade).toFixed(2)}</td></tr>
-                        <tr><th>Risco Total:</th><td>R$ ${((operation.entrada - operation.stop) * operation.quantidade).toFixed(2)}</td></tr>
-                        <tr><th>Retorno Potencial:</th><td>R$ ${((operation.alvo - operation.entrada) * operation.quantidade).toFixed(2)}</td></tr>
+                        <tr><th>Quantidade:</th><td>${qtyValue !== null ? qtyValue : '-'}</td></tr>
+                        <tr><th>Ticks parcial:</th><td>${ticksParcialValue !== null ? ticksParcialValue.toFixed(1) : '-'}</td></tr>
+                        <tr><th>Ticks alvo:</th><td>${ticksAlvoValue !== null ? ticksAlvoValue.toFixed(1) : '-'}</td></tr>
+                        <tr><th>Ticks stop:</th><td>${ticksStopValue !== null ? ticksStopValue.toFixed(1) : '-'}</td></tr>
+                        <tr><th>Valor nocional:</th><td>${nocionalDisplay}</td></tr>
+                        <tr><th>Risco total:</th><td>${riskTotalDisplay}</td></tr>
+                        <tr><th>Retorno potencial:</th><td>${potentialDisplay}</td></tr>
+                        <tr><th>Preço atual:</th><td>${this.formatCurrency(precoAtualValue)}</td></tr>
+                        <tr><th>Status:</th><td><span class="badge ${this.getStatusBadgeClass(statusText)}">${statusText}</span></td></tr>
+                        <tr><th>Gerada em:</th><td>${createdAtText}</td></tr>
                     </table>
                 </div>
             </div>
@@ -830,7 +1089,8 @@ class TradingApp {
         // Update PDF download link
         if (operation.pdf_path) {
             const pdfBtn = document.getElementById('download-pdf-btn');
-            pdfBtn.href = `/reports/${operation.pdf_path.split('/').pop()}`;
+            const fileName = operation.pdf_path.split(/[/\\]/).pop();
+            pdfBtn.href = fileName ? `/reports/${fileName}` : '#';
             pdfBtn.style.display = 'inline-block';
         } else {
             document.getElementById('download-pdf-btn').style.display = 'none';
@@ -940,14 +1200,29 @@ class TradingApp {
         
         // Quick trade button
         document.getElementById('quick-trade-btn').addEventListener('click', async () => {
+            const symbol = document.getElementById('quick-symbol').value;
+            const entradaBase = parseFloat(document.getElementById('quick-entrada').value);
+            if (!Number.isFinite(entradaBase)) {
+                this.showToast('Informe o preço de entrada para a operação rápida.', 'warning');
+                return;
+            }
+            const tickSizeQuick = this.inferTickSize(symbol);
+            const isCompra = document.getElementById('quick-type').value === 'COMPRA';
+            const alvoPreco = isCompra ? entradaBase * 1.02 : entradaBase * 0.98;
+            const stopPreco = isCompra ? entradaBase * 0.98 : entradaBase * 1.02;
+            const parcialPreco = isCompra ? entradaBase + (tickSizeQuick * 10) : entradaBase - (tickSizeQuick * 10);
             const operation = {
-                symbol: document.getElementById('quick-symbol').value,
+                symbol,
                 tipo: document.getElementById('quick-type').value,
-                entrada: parseFloat(document.getElementById('quick-entrada').value),
-                stop: parseFloat(document.getElementById('quick-entrada').value) * 0.98,
-                alvo: parseFloat(document.getElementById('quick-entrada').value) * 1.02,
+                entrada: entradaBase,
+                entrada_min: entradaBase,
+                entrada_max: entradaBase,
+                stop: stopPreco,
+                alvo: alvoPreco,
+                saida_parcial: parcialPreco,
                 quantidade: parseInt(document.getElementById('quick-quantidade').value),
-                timeframe: '15m'
+                timeframe: '15m',
+                tick_size: tickSizeQuick
             };
             
             try {
@@ -966,10 +1241,16 @@ class TradingApp {
                     const response = await fetch(`/api/quote/${symbol}`);
                     const data = await response.json();
                     
-                    document.getElementById('operation-entrada').value = data.price.toFixed(2);
+                    const price = Number(data.price) || 0;
+                    document.getElementById('operation-entrada').value = price.toFixed(2);
+                    document.getElementById('operation-entrada-min').value = price.toFixed(2);
+                    document.getElementById('operation-entrada-max').value = price.toFixed(2);
                     document.getElementById('asset-name').textContent = data.name;
-                    document.getElementById('operation-stop').value = (data.price * 0.98).toFixed(2);
-                    document.getElementById('operation-alvo').value = (data.price * 1.02).toFixed(2);
+                    document.getElementById('operation-stop').value = (price * 0.98).toFixed(2);
+                    document.getElementById('operation-alvo').value = (price * 1.02).toFixed(2);
+                    document.getElementById('operation-parcial').value = '';
+                    const inferredTick = this.inferTickSize(symbol);
+                    document.getElementById('operation-tick-size').value = inferredTick;
                     
                     this.calculateOperationSummary();
                     
@@ -982,15 +1263,44 @@ class TradingApp {
         // Operation form submit
         document.getElementById('operation-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
+            const symbol = document.getElementById('operation-symbol').value;
+            const tipo = document.getElementById('operation-type').value;
+            const entrada = this.sanitizeNumber(document.getElementById('operation-entrada').value);
+            const entradaMinRaw = this.sanitizeNumber(document.getElementById('operation-entrada-min').value);
+            const entradaMaxRaw = this.sanitizeNumber(document.getElementById('operation-entrada-max').value);
+            const stop = this.sanitizeNumber(document.getElementById('operation-stop').value);
+            const alvo = this.sanitizeNumber(document.getElementById('operation-alvo').value);
+            const parcial = this.sanitizeNumber(document.getElementById('operation-parcial').value);
+            const quantidade = parseInt(document.getElementById('operation-quantidade').value, 10) || 0;
+            const timeframe = document.getElementById('operation-timeframe').value;
+            const tickSizeInput = this.sanitizeNumber(document.getElementById('operation-tick-size').value);
+            const tickSize = tickSizeInput !== null ? tickSizeInput : this.inferTickSize(symbol);
+
+            let entradaMin = entradaMinRaw;
+            let entradaMax = entradaMaxRaw;
+            if (entradaMin === null && entrada !== null) entradaMin = entrada;
+            if (entradaMax === null && entrada !== null) entradaMax = entrada;
+
+            if (entrada === null || stop === null || alvo === null || quantidade <= 0) {
+                this.showToast('Preencha os campos obrigatórios da operação.', 'warning');
+                return;
+            }
+
+            const normalizedTickSize = tickSize > 0 ? tickSize : this.inferTickSize(symbol);
+
             const operation = {
-                ativo: document.getElementById('operation-symbol').value,
-                tipo: document.getElementById('operation-type').value,
-                entrada: parseFloat(document.getElementById('operation-entrada').value),
-                stop: parseFloat(document.getElementById('operation-stop').value),
-                alvo: parseFloat(document.getElementById('operation-alvo').value),
-                quantidade: parseInt(document.getElementById('operation-quantidade').value),
-                timeframe: document.getElementById('operation-timeframe').value,
+                ativo: symbol,
+                tipo,
+                entrada,
+                entrada_min: entradaMin,
+                entrada_max: entradaMax,
+                stop,
+                alvo,
+                saida_parcial: parcial,
+                quantidade,
+                timeframe,
+                tick_size: normalizedTickSize,
                 observacoes: document.getElementById('operation-observacoes').value
             };
             
@@ -1006,6 +1316,7 @@ class TradingApp {
                 // Reset form
                 e.target.reset();
                 document.getElementById('asset-name').textContent = '';
+                this.calculateOperationSummary();
                 
             } finally {
                 // Re-enable submit button
@@ -1036,33 +1347,74 @@ class TradingApp {
         });
         
         // Auto-calculate operation values
-        ['operation-entrada', 'operation-stop', 'operation-alvo', 'operation-quantidade'].forEach(id => {
-            document.getElementById(id).addEventListener('input', () => {
-                this.calculateOperationSummary();
-            });
+        [
+            'operation-entrada-min',
+            'operation-entrada',
+            'operation-entrada-max',
+            'operation-stop',
+            'operation-parcial',
+            'operation-alvo',
+            'operation-quantidade',
+            'operation-tick-size'
+        ].forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.addEventListener('input', () => {
+                    this.calculateOperationSummary();
+                });
+            }
         });
+
+        const typeElement = document.getElementById('operation-type');
+        if (typeElement) {
+            typeElement.addEventListener('change', () => this.calculateOperationSummary());
+        }
+
+        const symbolElement = document.getElementById('operation-symbol');
+        if (symbolElement) {
+            symbolElement.addEventListener('input', () => this.calculateOperationSummary());
+        }
+
+        this.calculateOperationSummary();
     }
     
     calculateOperationSummary() {
-        const entrada = parseFloat(document.getElementById('operation-entrada').value) || 0;
-        const stop = parseFloat(document.getElementById('operation-stop').value) || 0;
-        const alvo = parseFloat(document.getElementById('operation-alvo').value) || 0;
-        const quantidade = parseInt(document.getElementById('operation-quantidade').value) || 0;
-        
-        // Calculate values
-        const pontosStop = entrada - stop;
-        const pontosAlvo = alvo - entrada;
-        const riscoReward = pontosStop > 0 ? (pontosAlvo / pontosStop).toFixed(2) : 0;
-        
-        const totalValue = entrada * quantidade;
-        const riscoTotal = pontosStop * quantidade;
-        
-        // Update display
-        document.getElementById('risk-reward').value = `${riscoReward}:1`;
-        document.getElementById('total-value').textContent = `R$ ${totalValue.toFixed(2)}`;
-        document.getElementById('pontos-stop').textContent = pontosStop.toFixed(2);
-        document.getElementById('pontos-alvo').textContent = pontosAlvo.toFixed(2);
-        document.getElementById('risco-total').textContent = `R$ ${riscoTotal.toFixed(2)}`;
+        const symbol = document.getElementById('operation-symbol').value;
+        const tipo = (document.getElementById('operation-type').value || 'COMPRA').toUpperCase();
+        const entrada = this.sanitizeNumber(document.getElementById('operation-entrada').value);
+        const entradaMin = this.sanitizeNumber(document.getElementById('operation-entrada-min').value);
+        const entradaMax = this.sanitizeNumber(document.getElementById('operation-entrada-max').value);
+        const stop = this.sanitizeNumber(document.getElementById('operation-stop').value);
+        const alvo = this.sanitizeNumber(document.getElementById('operation-alvo').value);
+        const parcial = this.sanitizeNumber(document.getElementById('operation-parcial').value);
+        let tickSize = this.sanitizeNumber(document.getElementById('operation-tick-size').value);
+        if (tickSize === null || tickSize <= 0) {
+            tickSize = this.inferTickSize(symbol);
+        }
+
+        const quantidade = parseInt(document.getElementById('operation-quantidade').value, 10) || 0;
+
+        let referencia = entrada;
+        if (referencia === null && entradaMin !== null && entradaMax !== null) {
+            referencia = (entradaMin + entradaMax) / 2;
+        }
+        if (referencia === null) {
+            referencia = 0;
+        }
+
+        const ticksStop = this.computeDirectionalTicks(tipo, referencia, stop ?? referencia, tickSize);
+        const ticksAlvo = this.computeDirectionalTicks(tipo, referencia, alvo ?? referencia, tickSize);
+        const ticksParcial = parcial !== null ? this.computeDirectionalTicks(tipo, referencia, parcial, tickSize) : null;
+
+        const riskReward = ticksStop > 0 ? (ticksAlvo / ticksStop).toFixed(2) : null;
+        const totalValue = Number.isFinite(referencia) ? referencia * quantidade : 0;
+
+        document.getElementById('tick-size-preview').textContent = tickSize ? tickSize.toFixed(2) : '0,00';
+        document.getElementById('ticks-stop').textContent = ticksStop.toFixed(1);
+        document.getElementById('ticks-alvo').textContent = ticksAlvo.toFixed(1);
+        document.getElementById('ticks-parcial').textContent = ticksParcial !== null ? ticksParcial.toFixed(1) : '-';
+        document.getElementById('risk-reward').textContent = riskReward ? `${riskReward}:1` : '-';
+        document.getElementById('total-value').textContent = this.formatCurrency(totalValue);
     }
 }
 

@@ -500,44 +500,64 @@
                                 
                                 <div class="row">
                                     <div class="col-md-4 mb-3">
-                                        <label class="form-label">Preço de Entrada (R$) <span class="text-danger">*</span></label>
-                                        <input type="number" class="form-control" id="operation-entrada" 
+                                        <label class="form-label">Entrada Mínima (R$)</label>
+                                        <input type="number" class="form-control" id="operation-entrada-min"
+                                               step="0.01" min="0.00" placeholder="Faixa inferior">
+                                    </div>
+
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Entrada de Referência (R$) <span class="text-danger">*</span></label>
+                                        <input type="number" class="form-control" id="operation-entrada"
                                                step="0.01" min="0.01" required>
                                     </div>
-                                    
+
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Entrada Máxima (R$)</label>
+                                        <input type="number" class="form-control" id="operation-entrada-max"
+                                               step="0.01" min="0.00" placeholder="Faixa superior">
+                                    </div>
+                                </div>
+
+                                <div class="row">
                                     <div class="col-md-4 mb-3">
                                         <label class="form-label">Stop Loss (R$) <span class="text-danger">*</span></label>
-                                        <input type="number" class="form-control" id="operation-stop" 
+                                        <input type="number" class="form-control" id="operation-stop"
                                                step="0.01" min="0.01" required>
                                     </div>
-                                    
+
                                     <div class="col-md-4 mb-3">
-                                        <label class="form-label">Take Profit (R$) <span class="text-danger">*</span></label>
-                                        <input type="number" class="form-control" id="operation-alvo" 
+                                        <label class="form-label">Saída Parcial (R$)</label>
+                                        <input type="number" class="form-control" id="operation-parcial"
+                                               step="0.01" min="0.00" placeholder="Opcional">
+                                    </div>
+
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Alvo Final (R$) <span class="text-danger">*</span></label>
+                                        <input type="number" class="form-control" id="operation-alvo"
                                                step="0.01" min="0.01" required>
                                     </div>
                                 </div>
-                                
+
                                 <div class="row">
                                     <div class="col-md-4 mb-3">
                                         <label class="form-label">Quantidade <span class="text-danger">*</span></label>
-                                        <input type="number" class="form-control" id="operation-quantidade" 
-                                               value="100" min="1" required>
+                                        <input type="number" class="form-control" id="operation-quantidade"
+                                               value="1" min="1" required>
                                     </div>
-                                    
+
                                     <div class="col-md-4 mb-3">
-                                        <label class="form-label">Timeframe</label>
+                                        <label class="form-label">Timeframe Base</label>
                                         <select class="form-select" id="operation-timeframe">
                                             <option value="15m">15 Minutos</option>
-                                            <option value="1h">1 Hora</option>
+                                            <option value="1h">60 Minutos</option>
                                             <option value="1d">Diário</option>
                                         </select>
                                     </div>
-                                    
+
                                     <div class="col-md-4 mb-3">
-                                        <label class="form-label">Risco/Retorno</label>
-                                        <input type="text" class="form-control" id="risk-reward" 
-                                               readonly value="0:1">
+                                        <label class="form-label">Tick Size (pontos)</label>
+                                        <input type="number" class="form-control" id="operation-tick-size"
+                                               value="5" step="0.01" min="0.01" placeholder="Ex: 5 (WIN) ou 0.5 (WDO)">
                                     </div>
                                 </div>
                                 
@@ -552,22 +572,30 @@
                                         <div class="card bg-light">
                                             <div class="card-body">
                                                 <h6 class="card-title">Resumo da Operação</h6>
-                                                <div class="row">
+                                                <div class="row g-3">
                                                     <div class="col-6">
-                                                        <small>Valor Total:</small>
+                                                        <small>Tick Size:</small>
+                                                        <div class="fw-bold" id="tick-size-preview">0,00</div>
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <small>Ticks Parcial:</small>
+                                                        <div class="fw-bold" id="ticks-parcial">-</div>
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <small>Ticks Stop:</small>
+                                                        <div class="fw-bold" id="ticks-stop">0,00</div>
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <small>Ticks Alvo:</small>
+                                                        <div class="fw-bold" id="ticks-alvo">0,00</div>
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <small>Risco / Retorno:</small>
+                                                        <div class="fw-bold" id="risk-reward">0:1</div>
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <small>Valor Nocional:</small>
                                                         <div class="fw-bold" id="total-value">R$ 0,00</div>
-                                                    </div>
-                                                    <div class="col-6">
-                                                        <small>Pontos Stop:</small>
-                                                        <div class="fw-bold" id="pontos-stop">0,00</div>
-                                                    </div>
-                                                    <div class="col-6">
-                                                        <small>Pontos Alvo:</small>
-                                                        <div class="fw-bold" id="pontos-alvo">0,00</div>
-                                                    </div>
-                                                    <div class="col-6">
-                                                        <small>Risco:</small>
-                                                        <div class="fw-bold" id="risco-total">R$ 0,00</div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -604,10 +632,12 @@
                                 <tr>
                                     <th>ID</th>
                                     <th>Ativo</th>
-                                    <th>Tipo</th>
+                                    <th>Direção</th>
                                     <th>Entrada</th>
-                                    <th>Stop</th>
+                                    <th>Faixa</th>
+                                    <th>Parcial</th>
                                     <th>Alvo</th>
+                                    <th>Stop</th>
                                     <th>Qtd</th>
                                     <th>Status</th>
                                     <th>Data</th>
