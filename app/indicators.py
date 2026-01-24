@@ -96,9 +96,9 @@ class TechnicalNarrative:
     @staticmethod
     def _label_for(tf: str) -> str:
         labels = {
-            "6m": "6M",
-            "15m": "15M",
-            "1h": "60M",
+            "6m": "6 MIN",
+            "15m": "15 MIN",
+            "1h": "60 MIN",
             "1d": "DIÁRIO",
             "1w": "SEMANAL",
         }

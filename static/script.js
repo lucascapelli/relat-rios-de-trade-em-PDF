@@ -3,7 +3,37 @@ class TradingApp {
     constructor() {
         this.socket = null;
         this.currentSymbol = 'PETR4';
-        this.currentInterval = '15m';
+        this.allowedIntervals = ['1m', '15m', '60m'];
+        this.intervalDurations = {
+            '1m': 1,
+            '15m': 15,
+            '60m': 60,
+            '1h': 60,
+            '1d': 1440
+        };
+        this.scaleConfig = {
+            '1d': {
+                label: '1D',
+                durationMinutes: 1440,
+                preferredIntervals: ['1m', '15m', '60m'],
+                defaultInterval: '15m'
+            },
+            '5d': {
+                label: '5D',
+                durationMinutes: 7200,
+                preferredIntervals: ['15m', '60m'],
+                defaultInterval: '60m'
+            },
+            '1m': {
+                label: '1M',
+                durationMinutes: 43200,
+                preferredIntervals: ['60m', '15m'],
+                defaultInterval: '60m'
+            }
+        };
+        this.maxCandlesPerRequest = 1500;
+        this.currentScale = '1d';
+        this.currentInterval = this.enforceIntervalForScale(this.currentScale, '15m', { silent: true }).interval;
         this.charts = {};
         this.chartConfig = {
             responsive: true,
@@ -28,11 +58,13 @@ class TradingApp {
         
         // Load initial data
         this.loadDashboardData();
+        
+        // Setup event listeners before rendering charts
+        this.setupEventListeners();
+        this.updateIntervalButtons();
+        this.updateScaleButtons();
         this.loadChart(this.currentSymbol, this.currentInterval);
         this.loadOperationsHistory();
-        
-        // Setup event listeners
-        this.setupEventListeners();
         
         // Show welcome message
         setTimeout(() => {
@@ -192,10 +224,15 @@ class TradingApp {
     async loadChart(symbol, interval) {
         try {
             const normalizedSymbol = (symbol || '').toUpperCase();
-            if (interval && interval !== this.currentInterval) {
-                this.currentInterval = interval;
-            }
-            const response = await fetch(`/api/chart/${normalizedSymbol}/${interval}`);
+            let targetInterval = interval || this.currentInterval;
+            const enforced = this.enforceIntervalForScale(this.currentScale, targetInterval, { silent: true });
+            targetInterval = enforced.interval;
+            this.currentInterval = targetInterval;
+            this.updateIntervalButtons();
+            this.updateScaleButtons();
+
+            const limit = this.resolveFetchLimit(this.currentScale, this.currentInterval);
+            const response = await fetch(`/api/chart/${normalizedSymbol}/${this.currentInterval}?limit=${limit}`);
             const data = await response.json();
             
             if (data.error) {
@@ -205,7 +242,7 @@ class TradingApp {
             this.lastSeries = data.series;
             this.lastIndicators = data.indicators;
             const activeSymbol = (data.symbol || normalizedSymbol || '').toUpperCase();
-            const chartTitle = `${activeSymbol} - ${this.getIntervalName(interval)}`;
+            const chartTitle = `${activeSymbol} - ${this.getIntervalName(this.currentInterval)}`;
             this.lastChartTitle = chartTitle;
 
             const sourceKey = (data.source || '').toLowerCase();
@@ -216,8 +253,8 @@ class TradingApp {
                 this.lastDataSource = sourceKey;
             }
 
-            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'main-chart', chartTitle, interval);
-            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', chartTitle, interval);
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'main-chart', chartTitle, this.currentInterval, this.currentScale);
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', chartTitle, this.currentInterval, this.currentScale);
             this.updateIndicators(this.lastIndicators);
             if (Array.isArray(data.candles) && data.candles.length > 0) {
                 this.updateCurrentPrice(data.candles[data.candles.length - 1]);
@@ -239,7 +276,8 @@ class TradingApp {
             if (this.socket) {
                 this.socket.emit('request_chart', {
                     symbol: activeSymbol,
-                    interval
+                    interval: this.currentInterval,
+                    limit
                 });
             }
                 
@@ -249,7 +287,7 @@ class TradingApp {
         }
     }
     
-    renderSeriesChart(series, indicators, containerId, title, interval = this.currentInterval) {
+    renderSeriesChart(series, indicators, containerId, title, interval = this.currentInterval, scale = this.currentScale) {
         if (!series || !series.open || !series.open.length) {
             console.warn('Série vazia para renderização do gráfico', series);
             return;
@@ -260,32 +298,106 @@ class TradingApp {
             return;
         }
 
-        const timeValues = Array.isArray(series.time) && series.time.length > 0
-            ? series.time
-            : (Array.isArray(series.time_str) ? series.time_str : []);
+        // Build a per-candle datetime axis.
+        // NEVER fall back to numeric indexes for a date axis (it turns into 1970 in Plotly).
+        const openLen = series.open.length;
+        const rawTimeStr = Array.isArray(series.time_str) ? series.time_str : [];
+        const rawTime = Array.isArray(series.time) ? series.time : [];
 
-        const xAxis = timeValues.map((value, index) => {
-            const parsed = this.parseDateValue(value);
-            if (parsed) {
-                return parsed;
+        const resolvedXAxis = new Array(openLen);
+        const validMask = new Array(openLen).fill(false);
+        for (let i = 0; i < openLen; i++) {
+            const candidateStr = i < rawTimeStr.length ? rawTimeStr[i] : null;
+            const candidateIso = i < rawTime.length ? rawTime[i] : null;
+            let parsed = this.parseDateValue(candidateStr);
+            if (!parsed) {
+                parsed = this.parseDateValue(candidateIso);
             }
-            const fallback = Array.isArray(series.time)
-                ? this.parseDateValue(series.time[index])
-                : (Array.isArray(series.time_str) ? this.parseDateValue(series.time_str[index]) : null);
-            return fallback || value;
-        });
+            if (parsed) {
+                resolvedXAxis[i] = parsed;
+                validMask[i] = true;
+            } else {
+                resolvedXAxis[i] = null;
+            }
+        }
 
-        const resolvedXAxis = xAxis.length === series.open.length
-            ? xAxis
-            : series.open.map((_, idx) => (xAxis[idx] !== undefined ? xAxis[idx] : idx));
+        const scaleDurationMs = this.getScaleDurationMs(scale);
+        if (scaleDurationMs) {
+            let lastValidIndex = -1;
+            for (let i = openLen - 1; i >= 0; i--) {
+                if (validMask[i]) {
+                    lastValidIndex = i;
+                    break;
+                }
+            }
+            if (lastValidIndex >= 0) {
+                const lastDate = resolvedXAxis[lastValidIndex];
+                if (lastDate instanceof Date && !Number.isNaN(lastDate.valueOf())) {
+                    const cutoff = new Date(lastDate.getTime() - scaleDurationMs);
+                    for (let i = 0; i < openLen; i++) {
+                        if (validMask[i] && resolvedXAxis[i] instanceof Date && resolvedXAxis[i] < cutoff) {
+                            validMask[i] = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        const validCount = validMask.reduce((acc, ok) => acc + (ok ? 1 : 0), 0);
+        if (validCount < 2) {
+            console.warn('Não foi possível resolver datas válidas para o eixo X', {
+                interval,
+                openLen,
+                rawTimeLen: rawTime.length,
+                rawTimeStrLen: rawTimeStr.length,
+                sampleTime: rawTime[0],
+                sampleTimeStr: rawTimeStr[0]
+            });
+            this.showToast('Erro ao interpretar datas do gráfico (eixo X).', 'warning');
+            return;
+        }
+
+        // Filter all series arrays to keep only points that have a valid datetime.
+        const filterByMask = (arr) => {
+            if (!Array.isArray(arr) || arr.length !== openLen) {
+                return arr;
+            }
+            const out = [];
+            for (let i = 0; i < openLen; i++) {
+                if (validMask[i]) {
+                    out.push(arr[i]);
+                }
+            }
+            return out;
+        };
+
+        const xFiltered = filterByMask(resolvedXAxis);
+        const openFiltered = filterByMask(series.open);
+        const highFiltered = filterByMask(series.high);
+        const lowFiltered = filterByMask(series.low);
+        const closeFiltered = filterByMask(series.close);
+
+        const lastDate = xFiltered.length ? xFiltered[xFiltered.length - 1] : null;
+        let rangeStart = null;
+        if (lastDate instanceof Date && scaleDurationMs) {
+            const startCandidate = new Date(lastDate.getTime() - scaleDurationMs);
+            if (xFiltered.length) {
+                const firstDate = xFiltered[0];
+                if (firstDate instanceof Date && firstDate > startCandidate) {
+                    rangeStart = firstDate;
+                } else {
+                    rangeStart = startCandidate;
+                }
+            }
+        }
 
         const candlestickTrace = {
             type: 'candlestick',
-            x: resolvedXAxis,
-            open: series.open,
-            high: series.high,
-            low: series.low,
-            close: series.close,
+            x: xFiltered,
+            open: openFiltered,
+            high: highFiltered,
+            low: lowFiltered,
+            close: closeFiltered,
             name: 'Preço',
             increasing: {
                 line: { color: '#26a69a' },
@@ -308,15 +420,16 @@ class TradingApp {
 
         const traces = [candlestickTrace];
 
-        if (Array.isArray(series.volume)) {
+        if (Array.isArray(series.volume) && series.volume.length === openLen) {
+            const volumeFiltered = filterByMask(series.volume);
             traces.push({
                 type: 'bar',
-                x: resolvedXAxis,
-                y: series.volume,
+                x: xFiltered,
+                y: volumeFiltered,
                 name: 'Volume',
                 marker: {
-                    color: series.close.map((close, idx) => {
-                        const open = series.open[idx];
+                    color: closeFiltered.map((close, idx) => {
+                        const open = openFiltered[idx];
                         return close >= open ? 'rgba(38, 166, 154, 0.6)' : 'rgba(239, 83, 80, 0.6)';
                     })
                 },
@@ -330,12 +443,12 @@ class TradingApp {
             });
         }
 
-        if (Array.isArray(series.sma_9)) {
+        if (Array.isArray(series.sma_9) && series.sma_9.length === openLen) {
             traces.push({
                 type: 'scatter',
                 mode: 'lines',
-                x: resolvedXAxis,
-                y: series.sma_9,
+                x: xFiltered,
+                y: filterByMask(series.sma_9),
                 name: 'SMA 9',
                 line: { color: '#2196F3', width: 1.5 },
                 opacity: 0.7,
@@ -344,12 +457,12 @@ class TradingApp {
             });
         }
 
-        if (Array.isArray(series.sma_21)) {
+        if (Array.isArray(series.sma_21) && series.sma_21.length === openLen) {
             traces.push({
                 type: 'scatter',
                 mode: 'lines',
-                x: resolvedXAxis,
-                y: series.sma_21,
+                x: xFiltered,
+                y: filterByMask(series.sma_21),
                 name: 'SMA 21',
                 line: { color: '#FF9800', width: 1.5 },
                 opacity: 0.7,
@@ -358,12 +471,12 @@ class TradingApp {
             });
         }
 
-        if (Array.isArray(series.ema_21)) {
+        if (Array.isArray(series.ema_21) && series.ema_21.length === openLen) {
             traces.push({
                 type: 'scatter',
                 mode: 'lines',
-                x: resolvedXAxis,
-                y: series.ema_21,
+                x: xFiltered,
+                y: filterByMask(series.ema_21),
                 name: 'MME 21',
                 line: { color: '#1E88E5', width: 1.6, dash: 'dot' },
                 opacity: 0.95,
@@ -372,12 +485,12 @@ class TradingApp {
             });
         }
 
-        if (Array.isArray(series.ema_200)) {
+        if (Array.isArray(series.ema_200) && series.ema_200.length === openLen) {
             traces.push({
                 type: 'scatter',
                 mode: 'lines',
-                x: resolvedXAxis,
-                y: series.ema_200,
+                x: xFiltered,
+                y: filterByMask(series.ema_200),
                 name: 'MME 200',
                 line: { color: '#D32F2F', width: 1.8, dash: 'dot' },
                 opacity: 0.95,
@@ -386,12 +499,16 @@ class TradingApp {
             });
         }
 
-        if (Array.isArray(series.bb_upper) && Array.isArray(series.bb_middle) && Array.isArray(series.bb_lower)) {
+        if (
+            Array.isArray(series.bb_upper) && series.bb_upper.length === openLen &&
+            Array.isArray(series.bb_middle) && series.bb_middle.length === openLen &&
+            Array.isArray(series.bb_lower) && series.bb_lower.length === openLen
+        ) {
             traces.push({
                 type: 'scatter',
                 mode: 'lines',
-                x: resolvedXAxis,
-                y: series.bb_upper,
+                x: xFiltered,
+                y: filterByMask(series.bb_upper),
                 name: 'BB Superior',
                 line: { color: 'rgba(158, 158, 158, 0.5)', width: 1, dash: 'dash' },
                 showlegend: false,
@@ -400,8 +517,8 @@ class TradingApp {
             traces.push({
                 type: 'scatter',
                 mode: 'lines',
-                x: resolvedXAxis,
-                y: series.bb_lower,
+                x: xFiltered,
+                y: filterByMask(series.bb_lower),
                 name: 'BB Inferior',
                 line: { color: 'rgba(158, 158, 158, 0.5)', width: 1, dash: 'dash' },
                 fill: 'tonexty',
@@ -427,10 +544,9 @@ class TradingApp {
                 tickfont: { size: 10 },
                 rangeselector: {
                     buttons: [
-                        { count: 30, label: '30min', step: 'minute', stepmode: 'backward' },
-                        { count: 1, label: '1h', step: 'hour', stepmode: 'backward' },
-                        { count: 4, label: '4h', step: 'hour', stepmode: 'backward' },
-                        { count: 1, label: '1d', step: 'day', stepmode: 'backward' },
+                        { count: 1, label: '1D', step: 'day', stepmode: 'backward' },
+                        { count: 5, label: '5D', step: 'day', stepmode: 'backward' },
+                        { count: 1, label: '1M', step: 'month', stepmode: 'backward' },
                         { step: 'all', label: 'Tudo' }
                     ],
                     bgcolor: 'rgba(255, 255, 255, 0.9)',
@@ -478,8 +594,12 @@ class TradingApp {
 
         layout.xaxis = {
             ...layout.xaxis,
-            autorange: true
+            autorange: !rangeStart || !lastDate,
         };
+
+        if (rangeStart && lastDate) {
+            layout.xaxis.range = [rangeStart, lastDate];
+        }
 
         this.applyAxisFormats(layout, interval);
 
@@ -527,17 +647,23 @@ class TradingApp {
         }
 
         const normalized = (interval || '').toLowerCase();
-        const intraday = ['1m', '5m', '15m', '30m', '1h'].includes(normalized);
+        const intraday = ['1m', '5m', '15m', '30m', '1h', '60m', '60min'].includes(normalized);
         const daily = normalized === '1d' || normalized === 'diario';
         const weekly = normalized === '1w' || normalized === 'semanal';
 
         if (intraday) {
-            layout.xaxis.tickformat = '%d/%m %H:%M';
+            // Intraday often spans multiple days; showing only hours repeats and becomes ambiguous.
+            // Default to day+hour (two-line label) and keep full datetime on hover.
+            layout.xaxis.tickformat = '%d/%m<br>%H:%M';
             layout.xaxis.hoverformat = '%d/%m %H:%M';
             layout.xaxis.tickformatstops = [
                 { dtickrange: [null, 60 * 60 * 1000], value: '%H:%M' },
                 { dtickrange: [60 * 60 * 1000, 24 * 60 * 60 * 1000], value: '%d/%m %H:%M' },
                 { dtickrange: [24 * 60 * 60 * 1000, null], value: '%d/%m' }
+            ];
+            layout.xaxis.rangebreaks = [
+                { bounds: ['sat', 'mon'] },
+                { bounds: [17, 10], pattern: 'hour' }
             ];
         } else if (daily) {
             layout.xaxis.tickformat = '%d/%m';
@@ -546,18 +672,23 @@ class TradingApp {
                 { dtickrange: [null, 7 * 24 * 60 * 60 * 1000], value: '%d/%m' },
                 { dtickrange: [7 * 24 * 60 * 60 * 1000, null], value: '%d/%m/%Y' }
             ];
+            layout.xaxis.rangebreaks = [
+                { bounds: ['sat', 'mon'] }
+            ];
         } else if (weekly) {
             layout.xaxis.tickformat = '%d/%m/%Y';
             layout.xaxis.hoverformat = '%d/%m/%Y';
             layout.xaxis.tickformatstops = [
                 { dtickrange: [null, null], value: '%d/%m/%Y' }
             ];
+            layout.xaxis.rangebreaks = [];
         } else {
             layout.xaxis.tickformat = '%d/%m/%Y';
             layout.xaxis.hoverformat = '%d/%m/%Y';
             layout.xaxis.tickformatstops = [
                 { dtickrange: [null, null], value: '%d/%m/%Y' }
             ];
+            layout.xaxis.rangebreaks = [];
         }
     }
 
@@ -989,6 +1120,8 @@ class TradingApp {
                 this.currentInterval = data.interval;
             }
 
+            this.updateIntervalButtons();
+
             this.lastSeries = data.series;
             this.lastIndicators = data.indicators || this.lastIndicators;
             const title = `${data.symbol} - ${this.getIntervalName(data.interval)}`;
@@ -1002,8 +1135,8 @@ class TradingApp {
                 this.lastDataSource = sourceKey;
             }
 
-            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', title, data.interval);
-            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'main-chart', title, data.interval);
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', title, data.interval, this.currentScale);
+            this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'main-chart', title, data.interval, this.currentScale);
             if (this.lastIndicators) {
                 this.updateIndicators(this.lastIndicators);
             }
@@ -1019,16 +1152,18 @@ class TradingApp {
             this.updateSymbolButtons(this.currentSymbol);
             this.syncSymbolInputs(this.currentSymbol);
             if (this.lastSeries) {
-                this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', this.lastChartTitle, this.currentInterval);
+                this.renderSeriesChart(this.lastSeries, this.lastIndicators, 'analysis-chart', this.lastChartTitle, this.currentInterval, this.currentScale);
                 this.resizeChart('analysis-chart');
             } else {
                 this.loadChart(this.currentSymbol, this.currentInterval);
             }
             
             if (this.socket) {
+                const limit = this.resolveFetchLimit(this.currentScale, this.currentInterval);
                 this.socket.emit('request_chart', {
                     symbol: this.currentSymbol,
-                    interval: this.currentInterval
+                    interval: this.currentInterval,
+                    limit
                 });
             }
 
@@ -1186,12 +1321,113 @@ class TradingApp {
     getIntervalName(interval) {
         const intervals = {
             '1m': '1 Minuto',
-            '5m': '5 Minutos',
             '15m': '15 Minutos',
+            '60m': '60 Minutos',
             '1h': '1 Hora',
             '1d': 'Diário'
         };
         return intervals[interval] || interval;
+    }
+
+    getScaleDurationMs(scale) {
+        const config = this.scaleConfig[scale];
+        if (!config || !Number.isFinite(config.durationMinutes)) {
+            return null;
+        }
+        return config.durationMinutes * 60 * 1000;
+    }
+
+    enforceIntervalForScale(scale, requestedInterval, options = {}) {
+        const config = this.scaleConfig[scale];
+        const fallback = config?.defaultInterval || this.allowedIntervals[0] || requestedInterval;
+        const requested = this.allowedIntervals.includes(requestedInterval) ? requestedInterval : fallback;
+
+        if (!config) {
+            return { interval: requested, adjusted: false };
+        }
+
+        const maxCandles = this.maxCandlesPerRequest;
+        const buildPriority = () => {
+            const sequence = [];
+            if (requested) {
+                sequence.push(requested);
+            }
+            if (config.preferredIntervals) {
+                config.preferredIntervals.forEach(item => {
+                    if (!sequence.includes(item)) {
+                        sequence.push(item);
+                    }
+                });
+            }
+            if (config.defaultInterval && !sequence.includes(config.defaultInterval)) {
+                sequence.push(config.defaultInterval);
+            }
+            this.allowedIntervals.forEach(item => {
+                if (!sequence.includes(item)) {
+                    sequence.push(item);
+                }
+            });
+            return sequence;
+        };
+
+        const priorityList = buildPriority();
+        for (const candidate of priorityList) {
+            if (!this.allowedIntervals.includes(candidate)) {
+                continue;
+            }
+            const minutes = this.intervalDurations[candidate];
+            if (!Number.isFinite(minutes) || minutes <= 0) {
+                continue;
+            }
+            const candlesNeeded = Math.ceil(config.durationMinutes / minutes);
+            if (candlesNeeded <= maxCandles) {
+                const adjusted = candidate !== requested;
+                if (adjusted && !options.silent) {
+                    this.showToast(
+                        `Intervalo ajustado para ${this.getIntervalName(candidate)} para acompanhar a escala selecionada.`,
+                        'info'
+                    );
+                }
+                return { interval: candidate, adjusted };
+            }
+        }
+
+        return { interval: requested, adjusted: false };
+    }
+
+    resolveFetchLimit(scale, interval) {
+        const config = this.scaleConfig[scale];
+        const minutes = this.intervalDurations[interval];
+        if (!config || !Number.isFinite(minutes) || minutes <= 0) {
+            return 300;
+        }
+        const candlesNeeded = Math.ceil(config.durationMinutes / minutes) + 20;
+        const bounded = Math.min(Math.max(candlesNeeded, 120), this.maxCandlesPerRequest);
+        return bounded;
+    }
+
+    updateIntervalButtons() {
+        const interval = this.currentInterval;
+        document.querySelectorAll('.timeframe-btn, .timeframe-btn-chart').forEach(btn => {
+            const btnInterval = btn.getAttribute('data-interval');
+            if (btnInterval === interval) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
+
+    updateScaleButtons() {
+        const scale = this.currentScale;
+        document.querySelectorAll('.scale-btn, .scale-btn-chart').forEach(btn => {
+            const btnScale = btn.getAttribute('data-scale');
+            if (btnScale === scale) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
     }
     
     setupEventListeners() {
@@ -1207,16 +1443,29 @@ class TradingApp {
         document.querySelectorAll('.timeframe-btn, .timeframe-btn-chart').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const interval = e.currentTarget.getAttribute('data-interval');
-                this.currentInterval = interval;
-                
-                // Update active button
-                e.currentTarget.parentElement.querySelectorAll('.btn').forEach(b => {
-                    b.classList.remove('active');
-                });
-                e.currentTarget.classList.add('active');
-                
-                // Reload chart
-                this.loadChart(this.currentSymbol, interval);
+                if (!interval) {
+                    return;
+                }
+                const result = this.enforceIntervalForScale(this.currentScale, interval);
+                this.currentInterval = result.interval;
+                this.updateIntervalButtons();
+                this.loadChart(this.currentSymbol, this.currentInterval);
+            });
+        });
+
+        // Scale buttons
+        document.querySelectorAll('.scale-btn, .scale-btn-chart').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const scale = e.currentTarget.getAttribute('data-scale');
+                if (!scale) {
+                    return;
+                }
+                this.currentScale = scale;
+                const result = this.enforceIntervalForScale(scale, this.currentInterval);
+                this.currentInterval = result.interval;
+                this.updateScaleButtons();
+                this.updateIntervalButtons();
+                this.loadChart(this.currentSymbol, this.currentInterval);
             });
         });
         

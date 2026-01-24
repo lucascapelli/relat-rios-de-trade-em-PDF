@@ -26,15 +26,15 @@ DEFAULT_WIDTH = 900
 DEFAULT_HEIGHT = 420
 
 DATE_FORMAT_BY_TF: Dict[str, str] = {
-    "1m": "%H:%M",
-    "5m": "%H:%M",
-    "6m": "%H:%M",
-    "15m": "%H:%M",
-    "30m": "%H:%M",
-    "45m": "%H:%M",
+    "1m": "%d/%m %H:%M",
+    "5m": "%d/%m %H:%M",
+    "6m": "%d/%m %H:%M",
+    "15m": "%d/%m %H:%M",
+    "30m": "%d/%m %H:%M",
+    "45m": "%d/%m %H:%M",
     "1h": "%d/%m %H:%M",
     "4h": "%d/%m %H:%M",
-    "1d": "%d/%m",
+    "1d": "%d/%m/%Y",
     "1w": "%d/%m/%Y",
 }
 
@@ -79,6 +79,47 @@ HOLIDAYS: Sequence[str] = (
 HOLIDAY_INDEX = pd.to_datetime(HOLIDAYS, utc=False).normalize()
 INTRADAY_SET = {"1m", "5m", "6m", "15m", "30m", "45m", "1h", "4h"}
 
+TIMEFRAME_LABELS: Dict[str, str] = {
+    "1m": "1 min",
+    "5m": "5 min",
+    "6m": "6 min",
+    "15m": "15 min",
+    "30m": "30 min",
+    "45m": "45 min",
+    "1h": "60 min",
+    "4h": "4h",
+    "1d": "Diário",
+    "1w": "Semanal",
+}
+
+MAX_BARS_BY_TF: Dict[str, int] = {
+    "1m": 280,
+    "5m": 260,
+    "6m": 240,
+    "15m": 220,
+    "30m": 200,
+    "45m": 180,
+    "1h": 180,
+    "4h": 180,
+    "1d": 90,
+    "1w": 120,
+}
+
+
+def format_timeframe_label(timeframe: Optional[str]) -> str:
+    tf = (timeframe or "").strip().lower()
+    return TIMEFRAME_LABELS.get(tf, tf.upper() if tf else "")
+
+
+def _tail_for_timeframe(df: pd.DataFrame, timeframe: Optional[str]) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    tf = (timeframe or "").strip().lower()
+    limit = MAX_BARS_BY_TF.get(tf)
+    if not limit:
+        return df
+    return df.tail(limit)
+
 OVERLAY_STYLE: Sequence[Tuple[str, str, str, str, float]] = (
     ("SMA_9", "SMA 9", "#8E24AA", "solid", 1.2),
     ("SMA_21", "SMA 21", "#FB8C00", "solid", 1.2),
@@ -99,21 +140,77 @@ def prepare_ohlc_dataframe(
 
     frame = df.copy()
 
+    index_names: List[Optional[str]]
+    if isinstance(frame.index, pd.MultiIndex):
+        index_names = list(frame.index.names)
+    else:
+        index_names = [frame.index.name]
+
+    has_time_index = any(name == "time" for name in index_names if name is not None)
+    if has_time_index:
+        if isinstance(frame.index, pd.MultiIndex):
+            renamed_levels = [f"{name}_index" if name == "time" else name for name in index_names]
+            frame.index = frame.index.rename(renamed_levels)
+        else:
+            frame.index = frame.index.rename("time_index")
+
     if "time" in frame.columns:
         time_values = frame["time"]
     else:
-        index_name = frame.index.name or "index"
-        frame = frame.reset_index().rename(columns={index_name: "time"})
-        time_values = frame["time"]
+        # Se o index já for datetime, use-o diretamente; se for RangeIndex, não invente epoch (1970).
+        if isinstance(frame.index, pd.DatetimeIndex):
+            frame = frame.copy()
+            frame["time"] = frame.index
+            time_values = frame["time"]
+        else:
+            index_name = frame.index.name or "index"
+            frame = frame.reset_index().rename(columns={index_name: "time"})
+            time_values = frame["time"]
 
     if pd.api.types.is_integer_dtype(time_values):
-        parsed = pd.to_numeric(time_values, errors="coerce").dropna()
+        numeric = pd.to_numeric(time_values, errors="coerce")
+        parsed = numeric.dropna()
+
+        def _looks_like_row_index(values: pd.Series) -> bool:
+            try:
+                if values.empty:
+                    return False
+                # Heurística: sequência curta/pequena (0..n) com passo 1 -> não é timestamp.
+                v = values.astype("int64")
+                if v.min() not in (0, 1):
+                    return False
+                if v.max() - v.min() != len(v.unique()) - 1:
+                    return False
+                if len(v) < 3:
+                    return True
+                diffs = np.diff(np.sort(v.unique()))
+                return bool(np.all(diffs == 1))
+            except Exception:
+                return False
+
         if parsed.empty:
             frame["time"] = pd.to_datetime(time_values, errors="coerce")
+        elif _looks_like_row_index(parsed):
+            # Evita converter 0..N em epoch (1970). Tenta outras fontes de tempo antes de desistir.
+            if "time_str" in frame.columns:
+                frame["time"] = pd.to_datetime(frame["time_str"], errors="coerce")
+            elif isinstance(df.index, pd.DatetimeIndex):
+                frame["time"] = df.index
+            else:
+                raise ValueError("Missing datetime information for chart (time column looks like row index)")
         else:
             median_value = float(parsed.median())
-            unit = "ms" if median_value > 1_000_000_000_000 else "s"
-            frame["time"] = pd.to_datetime(time_values, unit=unit, origin="unix", errors="coerce")
+            abs_value = abs(median_value)
+            # Detecta unidade por ordem de grandeza.
+            if abs_value >= 1e17:
+                unit = "ns"
+            elif abs_value >= 1e14:
+                unit = "us"
+            elif abs_value >= 1e11:
+                unit = "ms"
+            else:
+                unit = "s"
+            frame["time"] = pd.to_datetime(numeric, unit=unit, origin="unix", errors="coerce")
     else:
         frame["time"] = pd.to_datetime(time_values, errors="coerce")
 
@@ -188,6 +285,7 @@ def render_price_chart_base64(
 ) -> str:
     try:
         normalized = prepare_ohlc_dataframe(df, timeframe)
+        normalized = _tail_for_timeframe(normalized, timeframe)
         enriched = _add_indicators(normalized)
     except Exception as exc:
         logger.error("Falha ao preparar dados do gráfico: %s", exc, exc_info=True)
@@ -197,7 +295,7 @@ def render_price_chart_base64(
         return ""
 
     plot_df = enriched.rename(
-        columns={"open": "Open", "high": "High", "low": "Low", "close": "Close"}
+        columns={"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
     )
 
     addplots: List = []
@@ -226,15 +324,25 @@ def render_price_chart_base64(
 
     tf_key = (timeframe or "").lower()
     show_nontrading = tf_key in {"1d", "1w"}
+    show_volume = bool("Volume" in plot_df.columns and plot_df["Volume"].notna().any())
+
+    last_update = enriched.index[-1] if not enriched.empty else None
+    footer = ""
+    if last_update is not None:
+        try:
+            footer = f"Atualizado: {pd.Timestamp(last_update).strftime('%d/%m/%Y %H:%M')} (BRT)"
+        except Exception:
+            footer = f"Atualizado: {last_update}"
 
     fig, axes = mpf.plot(
         plot_df,
         type="candle",
         style=style,
         addplot=addplots or None,
-        volume=False,
+        volume=show_volume,
         title=title,
         ylabel="Preço (R$)",
+        ylabel_lower="Volume" if show_volume else "",
         figsize=(width / 100, (height or DEFAULT_HEIGHT) / 100),
         returnfig=True,
         show_nontrading=show_nontrading,
@@ -243,16 +351,9 @@ def render_price_chart_base64(
 
     ax = axes[0] if isinstance(axes, (list, tuple, np.ndarray)) else axes
 
-    if tf_key in {"1m", "5m", "6m", "15m", "30m", "45m"}:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-    elif tf_key in {"1h", "4h"}:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m %H:%M"))
-    elif tf_key == "1d":
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m"))
-        ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
-    elif tf_key == "1w":
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m/%Y"))
-        ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=2))
+    locator = mdates.AutoDateLocator(minticks=4, maxticks=9)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
 
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
@@ -266,7 +367,20 @@ def render_price_chart_base64(
     if operation is not None:
         _draw_operation_levels(ax, plot_df, operation)
 
-    fig.tight_layout()
+    if footer:
+        try:
+            fig.text(0.99, 0.01, footer, ha="right", va="bottom", fontsize=7, color="#4b5563")
+        except Exception:
+            logger.debug("Falha ao adicionar rodapé de atualização", exc_info=True)
+
+    # mplfinance cria eixos extras (ex: volume) que nem sempre são compatíveis com tight_layout.
+    try:
+        if not show_volume:
+            fig.tight_layout()
+        else:
+            fig.subplots_adjust(top=0.90, bottom=0.10)
+    except Exception:
+        logger.debug("Falha ao ajustar layout do gráfico", exc_info=True)
 
     buffer = io.BytesIO()
     # Evita bbox_inches='tight' aqui para não gerar imagens gigantes em casos extremos.
@@ -310,6 +424,26 @@ def _draw_operation_levels(ax, df: pd.DataFrame, operation: Operation) -> None:
                 color=color,
                 bbox={"facecolor": "white", "edgecolor": color, "alpha": 0.8, "pad": 2},
             )
+
+        for attr, label, color in (
+            ("support_level", "Suporte", "#6b7280"),
+            ("resistance_level", "Resistência", "#6b7280"),
+        ):
+            value = getattr(operation, attr, None)
+            if value is None:
+                continue
+            price = float(value)
+            ax.axhline(y=price, linestyle=":", color=color, linewidth=1.2, alpha=0.9)
+            ax.text(
+                df.index[-1],
+                price,
+                f" {label}: R$ {price:.2f}",
+                va="center",
+                ha="left",
+                fontsize=7,
+                color=color,
+                bbox={"facecolor": "white", "edgecolor": color, "alpha": 0.75, "pad": 2},
+            )
     except Exception as exc:
         logger.warning("Falha ao desenhar níveis da operação: %s", exc, exc_info=True)
 
@@ -326,10 +460,23 @@ class ChartGenerator:
         if df is None or df.empty:
             raise ValueError("Empty dataframe passed to create_plotly_chart")
 
+        from plotly.subplots import make_subplots
+
         normalized = prepare_ohlc_dataframe(df, timeframe, reindex=False)
+        normalized = _tail_for_timeframe(normalized, timeframe)
         enriched = _add_indicators(normalized)
 
-        figure = go.Figure()
+        has_volume = "volume" in enriched.columns and pd.to_numeric(enriched["volume"], errors="coerce").fillna(0).sum() > 0
+        rows = 2 if has_volume else 1
+        row_heights = [0.78, 0.22] if has_volume else [1.0]
+        figure = make_subplots(
+            rows=rows,
+            cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.04,
+            row_heights=row_heights,
+        )
+
         figure.add_trace(
             go.Candlestick(
                 x=enriched.index,
@@ -343,7 +490,9 @@ class ChartGenerator:
                 increasing_fillcolor="#26a69a",
                 decreasing_fillcolor="#ef5350",
                 showlegend=False,
-            )
+            ),
+            row=1,
+            col=1,
         )
 
         for column, label, color, dash, width in OVERLAY_STYLE:
@@ -357,8 +506,27 @@ class ChartGenerator:
                             mode="lines",
                             name=label,
                             line={"color": color, "dash": dash, "width": width},
-                        )
+                        ),
+                        row=1,
+                        col=1,
                     )
+
+        if has_volume:
+            volume_series = pd.to_numeric(enriched["volume"], errors="coerce").fillna(0)
+            inc = (enriched["close"] >= enriched["open"]).astype(bool)
+            colors_bar = np.where(inc, "#26a69a", "#ef5350")
+            figure.add_trace(
+                go.Bar(
+                    x=enriched.index,
+                    y=volume_series.values,
+                    name="Volume",
+                    marker_color=colors_bar,
+                    opacity=0.55,
+                    showlegend=False,
+                ),
+                row=2,
+                col=1,
+            )
 
         tf_key = (timeframe or "").lower()
         tick_format = DATE_FORMAT_BY_TF.get(tf_key, "%d/%m %H:%M")
@@ -371,15 +539,21 @@ class ChartGenerator:
         figure.update_layout(
             title=title or "",
             template="plotly_white",
-            xaxis={
-                "rangeslider": {"visible": False},
-                "tickformat": tick_format,
-                "rangebreaks": rangebreaks,
-            },
-            yaxis={"title": "Preço (R$)"},
-            margin={"l": 40, "r": 20, "t": 50, "b": 40},
+            margin={"l": 50, "r": 20, "t": 58, "b": 40},
             legend={"orientation": "h", "y": -0.15},
         )
+
+        figure.update_xaxes(
+            rangeslider_visible=False,
+            type="date",
+            tickformat=tick_format,
+            rangebreaks=rangebreaks,
+            showgrid=True,
+            gridcolor="#eef2f7",
+        )
+        figure.update_yaxes(title_text="Preço (R$)", row=1, col=1)
+        if has_volume:
+            figure.update_yaxes(title_text="Volume", row=2, col=1)
         return figure
 
     def generate_chart_image(
@@ -447,4 +621,5 @@ __all__ = [
     "ChartGenerator",
     "prepare_ohlc_dataframe",
     "render_price_chart_base64",
+    "format_timeframe_label",
 ]

@@ -111,8 +111,8 @@ class ReportGenerator:
 
         return output_path
 
-    def _decode_charts(self, charts: Iterable[ChartPayload]) -> List[Tuple[str, Optional[BytesIO], str]]:
-        decoded: List[Tuple[str, Optional[BytesIO], str]] = []
+    def _decode_charts(self, charts: Iterable[ChartPayload]) -> List[ChartPayload]:
+        decoded: List[ChartPayload] = []
         for chart in charts:
             timeframe = str(chart.get("timeframe", "")).strip().lower()
             if not timeframe:
@@ -139,16 +139,24 @@ class ReportGenerator:
                 except Exception:
                     self._log.warning("Falha ao interpretar imagem crua do timeframe %s", timeframe, exc_info=True)
 
-            decoded.append((timeframe, buffer, str(chart.get("source", "desconhecido"))))
+            decoded.append(
+                {
+                    "timeframe": timeframe,
+                    "buffer": buffer,
+                    "source": str(chart.get("source", "desconhecido")),
+                    "last_time": chart.get("last_time"),
+                    "last_close": chart.get("last_close"),
+                }
+            )
 
-        order = {"15m": 0, "6m": 1, "30m": 2, "45m": 3, "1h": 4, "4h": 5, "1d": 6, "1w": 7}
-        decoded.sort(key=lambda item: (order.get(item[0], 99), item[0]))
+        order = {"15m": 0, "1h": 1, "1d": 2, "6m": 10, "30m": 11, "45m": 12, "4h": 13, "1w": 14}
+        decoded.sort(key=lambda item: (order.get(str(item.get("timeframe", "")), 99), str(item.get("timeframe", ""))))
         return decoded
 
     def _build_story(
         self,
         operation: Operation,
-        charts: List[Tuple[str, Optional[BytesIO], str]],
+        charts: List[ChartPayload],
         generated_at: datetime,
     ) -> List[Any]:
         styles = getSampleStyleSheet()
@@ -182,6 +190,7 @@ class ReportGenerator:
             ("Ticker", operation.symbol),
             ("Tipo", operation.tipo.upper()),
             ("Timeframe", operation.timeframe.upper()),
+            ("Preço atual", _fmt_price(operation.preco_atual) if operation.preco_atual else "-"),
             ("Entrada sugerida", _fmt_price(operation.entrada)),
             ("Entrada mínima", _fmt_price(operation.entrada_min)),
             ("Entrada máxima", _fmt_price(operation.entrada_max)),
@@ -254,13 +263,14 @@ class ReportGenerator:
         story.append(Paragraph(observacoes, styles["InfoText"]))
         story.append(Spacer(1, 6 * mm))
 
-        valid_charts = [(tf, buf, src) for tf, buf, src in charts if buf]
+        valid_charts = [chart for chart in charts if chart.get("buffer")]
         if valid_charts:
             story.append(Paragraph("Gráficos", styles["SectionHeading"]))
             story.append(Spacer(1, 4 * mm))
             timeframe_labels = {
                 "1m": "1 Minuto",
                 "5m": "5 Minutos",
+                "6m": "6 Minutos",
                 "15m": "15 Minutos",
                 "30m": "30 Minutos",
                 "45m": "45 Minutos",
@@ -270,8 +280,21 @@ class ReportGenerator:
                 "1w": "Semanal",
             }
 
+            def _fmt_source(value: str) -> str:
+                raw = (value or "").strip().lower()
+                if not raw or raw == "desconhecido":
+                    return "desconhecido"
+                if raw.startswith("fallback"):
+                    return "fallback"
+                return raw
+
             rendered = 0
-            for idx, (timeframe, buffer, source) in enumerate(valid_charts):
+            for idx, chart in enumerate(valid_charts):
+                timeframe = str(chart.get("timeframe", "")).strip().lower()
+                buffer = chart.get("buffer")
+                source = str(chart.get("source", "desconhecido"))
+                last_time = chart.get("last_time")
+                last_close = chart.get("last_close")
                 try:
                     buffer.seek(0)
                     reader = ImageReader(buffer)
@@ -288,13 +311,21 @@ class ReportGenerator:
                 img.hAlign = "CENTER"
 
                 label = timeframe_labels.get(timeframe, timeframe.upper())
+                update_line = ""
+                if last_time:
+                    update_line = f"Atualizado: {last_time}"
+                elif last_close is not None:
+                    update_line = f"Último preço: {_fmt_price(float(last_close))}"
                 chart_block: List[Any] = [
                     Paragraph(f"{operation.symbol} - {label}", styles["InfoText"]),
                     Spacer(1, 2 * mm),
                     img,
                     Spacer(1, 1 * mm),
-                    Paragraph(f"Fonte: {source}", styles["InfoText"]),
+                    Paragraph(f"Fonte: {_fmt_source(source)}", styles["InfoText"]),
                 ]
+
+                if update_line:
+                    chart_block.append(Paragraph(update_line, styles["InfoText"]))
 
                 story.append(KeepTogether(chart_block))
                 story.append(Spacer(1, 6 * mm))

@@ -6,7 +6,7 @@ import json
 import plotly
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
-from ..charts import ChartGenerator
+from ..charts import ChartGenerator, format_timeframe_label
 from ..models import asdict
 from ..services import Services
 from ..utils import logger
@@ -65,18 +65,40 @@ def register_socket_handlers(socketio: SocketIO, services: Services) -> None:
 		try:
 			symbol = data.get("symbol") if isinstance(data, dict) else None
 			interval = data.get("interval", "15m") if isinstance(data, dict) else "15m"
+			limit_raw = data.get("limit") if isinstance(data, dict) else None
+			try:
+				limit_value = int(limit_raw) if limit_raw is not None else 100
+			except (TypeError, ValueError):
+				limit_value = 100
+			limit = max(50, min(limit_value, 1500))
 
 			if not symbol:
 				emit("chart_error", {"error": "Símbolo não informado"})
 				return
 
-			df_raw = finance_data.get_candles(symbol, interval, 100)
+			df_raw = finance_data.get_candles(symbol, interval, limit)
 			df_norm = ChartGenerator.prepare_ohlc_dataframe(df_raw, interval)
 			df_norm = ChartGenerator._ensure_overlay_columns(df_norm)
 			payload_df = df_norm.reset_index().rename(columns={df_norm.index.name or "index": "time"})
-			fig = chart_generator.create_plotly_chart(df_norm, f"{symbol} - {interval}", timeframe=interval)
-			candles_payload, series = _build_chart_components(payload_df, limit=100)
-			source = df_norm.attrs.get("source", df_raw.attrs.get("source", "unknown"))
+			source_raw = df_norm.attrs.get("source", df_raw.attrs.get("source", "unknown"))
+			source = source_raw
+			if isinstance(source_raw, str) and source_raw.lower().startswith("fallback"):
+				source = "fallback"
+			last_update_str = ""
+			if not df_norm.empty:
+				try:
+					last_update_str = df_norm.index[-1].strftime("%d/%m/%Y %H:%M")
+				except Exception:
+					last_update_str = str(df_norm.index[-1])
+			tf_label = format_timeframe_label(interval)
+			title_parts = [symbol, tf_label]
+			if source and source != "unknown":
+				title_parts.append(f"Fonte: {source}")
+			if last_update_str:
+				title_parts.append(f"Atualizado: {last_update_str}")
+			fig_title = " • ".join([p for p in title_parts if p])
+			fig = chart_generator.create_plotly_chart(df_norm, fig_title, timeframe=interval)
+			candles_payload, series = _build_chart_components(payload_df, limit=limit)
 
 			emit(
 				"chart_data",

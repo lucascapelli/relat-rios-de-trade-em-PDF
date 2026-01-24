@@ -10,7 +10,7 @@ import pandas as pd
 import plotly
 from flask import Blueprint, jsonify, render_template, request, send_from_directory
 
-from ..charts import ChartGenerator
+from ..charts import ChartGenerator, format_timeframe_label
 from ..config import PLACEHOLDER_IMAGE_DATA_URL, REPORTS_DIR
 from ..indicators import TechnicalNarrative
 from ..models import Operation, asdict
@@ -53,7 +53,14 @@ def _build_chart_components(df: pd.DataFrame, limit: int = 100) -> Tuple[List[Di
         if pd.isna(volume_value):
             volume_value = 0
 
-        iso_time = row["time"].isoformat() if hasattr(row["time"], "isoformat") else str(row["time"])
+        # Emit time in a JS-friendly ISO format (seconds precision).
+        # Some browsers/Plotly paths can behave badly with 6-digit microseconds.
+        try:
+            time_ts = pd.Timestamp(row["time"]).to_pydatetime().replace(microsecond=0)
+            iso_time = time_ts.isoformat()
+        except Exception:
+            iso_time = row["time"].isoformat() if hasattr(row["time"], "isoformat") else str(row["time"])
+
         time_str = row["time_str"] if "time_str" in row.index else iso_time
 
         candles.append(
@@ -107,7 +114,7 @@ def register_api_routes(app, services: Services) -> None:
 
         try:
             df = finance_data.get_candles("PETR4", "15m", 50)
-            fig = chart_generator.create_plotly_chart(df, "PETR4 - 15 Minutos", timeframe="15m")
+            fig = chart_generator.create_plotly_chart(df, f"PETR4 • {format_timeframe_label('15m')}", timeframe="15m")
             graph_json = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         except Exception as exc:
             logger.error(f"Erro no gráfico inicial: {exc}")
@@ -131,7 +138,10 @@ def register_api_routes(app, services: Services) -> None:
     @bp.route("/api/chart/<symbol>/<interval>")
     def api_chart(symbol: str, interval: str):
         try:
-            df_raw = finance_data.get_candles(symbol, interval, 100)
+            limit_raw = request.args.get("limit", type=int, default=100)
+            limit = max(50, min(limit_raw or 100, 1500))
+
+            df_raw = finance_data.get_candles(symbol, interval, limit)
             df_norm = ChartGenerator.prepare_ohlc_dataframe(df_raw, interval)
             df_norm = ChartGenerator._ensure_overlay_columns(df_norm)
             payload_df = df_norm.reset_index().rename(columns={df_norm.index.name or "index": "time"})
@@ -142,11 +152,28 @@ def register_api_routes(app, services: Services) -> None:
                 except Exception:
                     payload_df["time_str"] = payload_df["time"].astype(str)
 
-            fig = chart_generator.create_plotly_chart(df_norm, f"{symbol} - {interval}", timeframe=interval)
+            source_raw = df_norm.attrs.get("source", df_raw.attrs.get("source", "unknown"))
+            source = source_raw
+            if isinstance(source_raw, str) and source_raw.lower().startswith("fallback"):
+                source = "fallback"
+            last_update_str = ""
+            if not df_norm.empty:
+                try:
+                    last_update_str = pd.Timestamp(df_norm.index[-1]).strftime("%d/%m/%Y %H:%M")
+                except Exception:
+                    last_update_str = str(df_norm.index[-1])
+            tf_label = format_timeframe_label(interval)
+            title_parts = [symbol, tf_label]
+            if source and source != "unknown":
+                title_parts.append(f"Fonte: {source}")
+            if last_update_str:
+                title_parts.append(f"Atualizado: {last_update_str}")
+            fig_title = " • ".join([p for p in title_parts if p])
 
-            candles_payload, series = _build_chart_components(payload_df, limit=100)
+            fig = chart_generator.create_plotly_chart(df_norm, fig_title, timeframe=interval)
 
-            source = df_norm.attrs.get("source", df_raw.attrs.get("source", "unknown"))
+            candles_payload, series = _build_chart_components(payload_df, limit=limit)
+
             if candles_payload:
                 last_candle = candles_payload[-1]
                 last_open = float(last_candle.get("open", 0) or 0)
@@ -185,6 +212,23 @@ def register_api_routes(app, services: Services) -> None:
     def api_operation():
         try:
             data = request.get_json() or {}
+
+            def _normalize_tf(value: Any) -> str:
+                raw = (str(value or "").strip().lower())
+                mapping = {
+                    "60m": "1h",
+                    "60min": "1h",
+                    "1hour": "1h",
+                    "1d": "1d",
+                    "daily": "1d",
+                    "diario": "1d",
+                    "1w": "1w",
+                    "weekly": "1w",
+                    "semanal": "1w",
+                    "15": "15m",
+                    "15min": "15m",
+                }
+                return mapping.get(raw, raw)
 
             def _get_first(keys: List[str]):
                 for key in keys:
@@ -228,7 +272,7 @@ def register_api_routes(app, services: Services) -> None:
             parcial_preco = _parse_float(_get_first(["saida_parcial", "parcial", "parcial_preco"]))
             tick_size = _parse_float(_get_first(["tick_size", "tickSize"]))
 
-            timeframe = (_get_first(["timeframe", "timeframe_base"]) or "15m").lower()
+            timeframe = _normalize_tf(_get_first(["timeframe", "timeframe_base"]) or "15m")
 
             operation = Operation(
                 symbol=symbol,
@@ -258,8 +302,8 @@ def register_api_routes(app, services: Services) -> None:
                     operation.status = "STOP ATINGIDO"
 
             preferred_timeframes: List[str] = []
-            # 15m como timeframe principal; 6m entra como confirmação
-            base_timeframes = ["15m", "6m", "1h", "1d", "1w"]
+            # PDFs: manter apenas visão tática (15m), confirmação (1h) e contexto (1d)
+            base_timeframes = ["15m", "1h", "1d"]
             if operation.timeframe and operation.timeframe not in base_timeframes:
                 preferred_timeframes.append(operation.timeframe)
             for candidate in base_timeframes:
@@ -268,6 +312,14 @@ def register_api_routes(app, services: Services) -> None:
 
             chart_images: List[Dict[str, Any]] = []
             indicator_df: Optional[pd.DataFrame] = None
+
+            def _fmt_source(value: str) -> str:
+                raw = (value or "").strip().lower()
+                if not raw:
+                    return "desconhecido"
+                if raw.startswith("fallback"):
+                    return "fallback"
+                return raw
 
             for tf in preferred_timeframes:
                 df_real = finance_data.get_candles(operation.symbol, tf, 150)
@@ -294,7 +346,7 @@ def register_api_routes(app, services: Services) -> None:
 
                 img = chart_generator.generate_chart_image(
                     df,
-                    f"{operation.symbol} - {tf}",
+                    f"{operation.symbol} • {format_timeframe_label(tf)}",
                     timeframe=tf,
                     operation=operation,
                 )
@@ -304,7 +356,7 @@ def register_api_routes(app, services: Services) -> None:
                     {
                         "timeframe": tf,
                         "image": img if img else PLACEHOLDER_IMAGE_DATA_URL,
-                        "source": df.attrs.get("source", "desconhecido"),
+                        "source": _fmt_source(df.attrs.get("source", "desconhecido")),
                         "last_close": float(last_row["close"]) if last_row is not None and "close" in df.columns else None,
                         "last_time": str(last_row["time_str"]) if last_row is not None and "time_str" in df.columns else None,
                     }
@@ -340,7 +392,7 @@ def register_api_routes(app, services: Services) -> None:
                     {
                         "timeframe": operation.timeframe,
                         "image": fallback_img if fallback_img else PLACEHOLDER_IMAGE_DATA_URL,
-                        "source": fallback_df.attrs.get("source", "fallback"),
+                        "source": _fmt_source(fallback_df.attrs.get("source", "fallback")),
                         "last_close": float(fallback_row["close"]) if fallback_row is not None and "close" in fallback_df.columns else None,
                         "last_time": str(fallback_row["time_str"]) if fallback_row is not None and "time_str" in fallback_df.columns else None,
                     }

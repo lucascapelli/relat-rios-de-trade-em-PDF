@@ -167,6 +167,57 @@
             color: #fff;
             border-color: var(--secondary-color);
         }
+
+        .dashboard-sidebar .card {
+            margin-bottom: 1rem;
+        }
+
+        .dashboard-sidebar .compact-card .card-body {
+            padding: 16px;
+        }
+
+        #market-news {
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        #market-news .alert {
+            padding: 0.6rem 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        #recent-operations {
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        #recent-operations .list-group-item {
+            padding: 0.75rem 1rem;
+        }
+
+        .dashboard-equal-height {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: stretch;
+        }
+
+        .dashboard-equal-height>.column-wrapper {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .dashboard-equal-height>.column-wrapper .card {
+            height: 100%;
+        }
+
+        @media (max-width: 991.98px) {
+            .dashboard-equal-height {
+                flex-direction: column;
+            }
+            .dashboard-equal-height>.column-wrapper {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
@@ -244,9 +295,9 @@
     <div class="container-fluid mt-4">
         <!-- Dashboard Section (Default) -->
         <section id="dashboard-section" class="section active">
-            <div class="row">
-                <!-- Stocks Overview -->
-                <div class="col-md-3">
+            <div class="row dashboard-equal-height g-4">
+                <!-- Sidebar Column -->
+                <div class="column-wrapper col-12 col-lg-4 col-xl-3 dashboard-sidebar pe-lg-3">
                     <div class="card stock-card shadow-sm mb-4">
                         <div class="card-header bg-primary text-white">
                             <h6 class="mb-0"><i class="fas fa-star me-2"></i>Ativos Principais</h6>
@@ -282,35 +333,9 @@
                             </div>
                         </div>
                     </div>
-                </div>
-                
-                <!-- Main Chart -->
-                <div class="col-md-6">
-                    <div class="chart-container shadow-sm mb-4">
-                        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-                            <div class="d-flex align-items-center flex-wrap gap-2">
-                                <h5 class="mb-0" id="chart-title">PETR4 - 15 Minutos</h5>
-                                <div class="btn-group btn-group-sm symbol-toggle-group" role="group" aria-label="Alternar ativo principal">
-                                    <button type="button" class="btn btn-outline-secondary symbol-toggle active" data-symbol="PETR4">PETR4</button>
-                                    <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="VALE3">VALE3</button>
-                                    <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="ITUB4">ITUB4</button>
-                                    <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="BBDC4">BBDC4</button>
-                                </div>
-                            </div>
-                            <div class="btn-group" role="group">
-                                <button type="button" class="btn btn-outline-primary btn-sm timeframe-btn active" 
-                                        data-interval="15m">15m</button>
-                                <button type="button" class="btn btn-outline-primary btn-sm timeframe-btn" 
-                                        data-interval="1h">1h</button>
-                                <button type="button" class="btn btn-outline-primary btn-sm timeframe-btn" 
-                                        data-interval="1d">1d</button>
-                            </div>
-                        </div>
-                        <div id="main-chart" style="height: 400px;"></div>
-                    </div>
-                    
+
                     <!-- Market News -->
-                    <div class="card shadow-sm">
+                    <div class="card shadow-sm compact-card">
                         <div class="card-body">
                             <h6 class="card-title mb-3">
                                 <i class="fas fa-newspaper me-2"></i>Notícias do Mercado
@@ -330,14 +355,41 @@
                     </div>
                 </div>
                 
-                <!-- Recent Operations -->
-                <div class="col-md-3">
-                    <div class="card shadow-sm">
+                <!-- Main Column -->
+                <div class="column-wrapper flex-grow-1 col-12 col-lg-8 col-xl-9">
+                    <div class="chart-container shadow-sm mb-4">
+                        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-3">
+                            <div class="d-flex align-items-center flex-wrap gap-2">
+                                <h5 class="mb-0" id="chart-title">PETR4 - 15 Minutos</h5>
+                                <div class="btn-group btn-group-sm symbol-toggle-group" role="group" aria-label="Alternar ativo principal">
+                                    <button type="button" class="btn btn-outline-secondary symbol-toggle active" data-symbol="PETR4">PETR4</button>
+                                    <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="VALE3">VALE3</button>
+                                    <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="ITUB4">ITUB4</button>
+                                    <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="BBDC4">BBDC4</button>
+                                </div>
+                            </div>
+                            <div class="d-flex flex-wrap align-items-center gap-2">
+                                <div class="btn-group btn-group-sm timeframe-group" role="group" aria-label="Selecionar intervalo">
+                                    <button type="button" class="btn btn-outline-primary timeframe-btn" data-interval="1m">1m</button>
+                                    <button type="button" class="btn btn-outline-primary timeframe-btn active" data-interval="15m">15m</button>
+                                    <button type="button" class="btn btn-outline-primary timeframe-btn" data-interval="60m">60m</button>
+                                </div>
+                                <div class="btn-group btn-group-sm scale-group" role="group" aria-label="Selecionar escala de tempo">
+                                    <button type="button" class="btn btn-outline-secondary scale-btn active" data-scale="1d">1D</button>
+                                    <button type="button" class="btn btn-outline-secondary scale-btn" data-scale="5d">5D</button>
+                                    <button type="button" class="btn btn-outline-secondary scale-btn" data-scale="1m">1M</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="main-chart" style="height: 520px;"></div>
+                    </div>
+
+                    <div class="card shadow-sm compact-card h-100">
                         <div class="card-header bg-dark text-white">
                             <h6 class="mb-0"><i class="fas fa-clock me-2"></i>Operações Recentes</h6>
                         </div>
-                        <div class="card-body p-0">
-                            <div id="recent-operations" class="list-group list-group-flush">
+                        <div class="card-body p-0 d-flex flex-column">
+                            <div id="recent-operations" class="list-group list-group-flush card-content-scroll">
                                 <!-- Recent operations will be loaded here -->
                             </div>
                         </div>
@@ -365,25 +417,23 @@
                                 </div>
                             </div>
                             <div class="col-md-6">
-                            <div class="d-flex justify-content-end flex-wrap gap-2">
-                                <div class="btn-group btn-group-sm symbol-toggle-group" role="group" aria-label="Alternar ativo do gráfico">
-                                <button type="button" class="btn btn-outline-secondary symbol-toggle active" data-symbol="PETR4">PETR4</button>
-                                <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="VALE3">VALE3</button>
-                                <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="ITUB4">ITUB4</button>
-                                <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="BBDC4">BBDC4</button>
-                                </div>
-                                <div class="btn-group timeframe-group" role="group">
-                                <button type="button" class="btn btn-outline-primary timeframe-btn-chart active" 
-                                    data-interval="1m">1m</button>
-                                <button type="button" class="btn btn-outline-primary timeframe-btn-chart" 
-                                    data-interval="5m">5m</button>
-                                <button type="button" class="btn btn-outline-primary timeframe-btn-chart" 
-                                    data-interval="15m">15m</button>
-                                <button type="button" class="btn btn-outline-primary timeframe-btn-chart" 
-                                    data-interval="1h">1h</button>
-                                <button type="button" class="btn btn-outline-primary timeframe-btn-chart" 
-                                    data-interval="1d">1d</button>
-                                </div>
+                                <div class="d-flex justify-content-end flex-wrap gap-2">
+                                    <div class="btn-group btn-group-sm symbol-toggle-group" role="group" aria-label="Alternar ativo do gráfico">
+                                        <button type="button" class="btn btn-outline-secondary symbol-toggle active" data-symbol="PETR4">PETR4</button>
+                                        <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="VALE3">VALE3</button>
+                                        <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="ITUB4">ITUB4</button>
+                                        <button type="button" class="btn btn-outline-secondary symbol-toggle" data-symbol="BBDC4">BBDC4</button>
+                                    </div>
+                                    <div class="btn-group btn-group-sm timeframe-group" role="group">
+                                        <button type="button" class="btn btn-outline-primary timeframe-btn-chart" data-interval="1m">1m</button>
+                                        <button type="button" class="btn btn-outline-primary timeframe-btn-chart active" data-interval="15m">15m</button>
+                                        <button type="button" class="btn btn-outline-primary timeframe-btn-chart" data-interval="60m">60m</button>
+                                    </div>
+                                    <div class="btn-group btn-group-sm scale-group" role="group">
+                                        <button type="button" class="btn btn-outline-secondary scale-btn-chart active" data-scale="1d">1D</button>
+                                        <button type="button" class="btn btn-outline-secondary scale-btn-chart" data-scale="5d">5D</button>
+                                        <button type="button" class="btn btn-outline-secondary scale-btn-chart" data-scale="1m">1M</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
