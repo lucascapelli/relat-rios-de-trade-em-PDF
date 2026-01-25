@@ -1,14 +1,14 @@
 """Data models used across the application."""
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .config import BR_TZ, DEFAULT_TICK_SIZE, TICK_SIZE_MAP
 
 
-__all__ = ["TickerInfo", "Operation", "Candle", "asdict"]
+__all__ = ["TickerInfo", "Operation", "Candle", "SwingTradeOperation", "DayTradeEntry", "DayTradeSession", "PortfolioAsset", "Portfolio", "asdict"]
 
 
 @dataclass
@@ -141,3 +141,91 @@ class Candle:
             "close": self.close,
             "volume": self.volume,
         }
+
+
+@dataclass
+class SwingTradeOperation:
+    """Swing Trade operation model."""
+    symbol: str
+    direction: str  # 'LONG' or 'SHORT'
+    entry: float
+    entry_min: float
+    entry_max: float
+    target: float
+    stop: float
+    quantity: int
+    trade_date: str
+    timeframe_major: str = "1d"  # ex: 1h, 4h, 1d
+    timeframe_minor: str = "1h"  # ex: 15m, 1h
+    risk_amount: Optional[float] = None  # Risco em R$
+    risk_percent: Optional[float] = None  # Risco %
+    target_percent: Optional[float] = None  # Alvo %
+    stop_percent: Optional[float] = None  # Stop %
+    analytical_text: str = ""  # Texto analítico IA/manual
+    client_name: Optional[str] = None  # Cliente específico
+    status: str = "ABERTA"
+    created_at: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.created_at is None:
+            self.created_at = datetime.now(BR_TZ).isoformat()
+
+
+@dataclass
+class DayTradeEntry:
+    """Single day trade entry."""
+    symbol: str
+    direction: str  # 'C' (Compra) or 'V' (Venda)
+    entry: float
+    max_entry_variation: float
+    target: float
+    stop: float
+    risk_zero_price: Optional[float] = None
+    risk_zero_percent: Optional[float] = None
+    target_percent: Optional[float] = None
+    stop_percent: Optional[float] = None
+
+
+@dataclass
+class DayTradeSession:
+    """Day trade session with multiple entries."""
+    trade_date: str
+    timeframe_major: str = "1h"
+    timeframe_minor: str = "15m"
+    risk_amount: Optional[float] = None
+    risk_percent: Optional[float] = None
+    entries_long: List[DayTradeEntry] = field(default_factory=list)  # Compras
+    entries_short: List[DayTradeEntry] = field(default_factory=list)  # Vendas
+    created_at: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.created_at is None:
+            self.created_at = datetime.now(BR_TZ).isoformat()
+
+
+@dataclass
+class PortfolioAsset:
+    """Single asset in a portfolio."""
+    symbol: str
+    entry: float
+    entry_max: float
+    risk_zero: float
+    target: float
+    stop: float
+
+
+@dataclass
+class Portfolio:
+    """Portfolio model."""
+    portfolio_type: str  # 'GERAL', 'SEMANAL', 'MENSAL', 'SMALL', etc.
+    state: str  # 'CONSTRUIR', 'ANTERIOR', 'HISTORICO'
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    assets: List[PortfolioAsset] = field(default_factory=list)
+    analytical_text: str = ""
+    version: int = 1
+    created_at: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.created_at is None:
+            self.created_at = datetime.now(BR_TZ).isoformat()

@@ -23,7 +23,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from .config import BR_TZ
+from .config import BR_TZ, INSTITUTION_NAME, INSTITUTION_TEXT
 from .models import Operation
 from .utils import logger
 
@@ -99,7 +99,7 @@ class ReportGenerator:
             topMargin=18 * mm,
             bottomMargin=18 * mm,
             title=f"Relatório {operation.symbol}",
-            author="Relatórios Trade",
+            author=INSTITUTION_NAME,
         )
 
         try:
@@ -107,6 +107,248 @@ class ReportGenerator:
             self._log.info("PDF gerado: %s", output_path)
         except Exception:
             self._log.error("Erro ao gerar PDF", exc_info=True)
+            raise
+
+        return output_path
+
+    def generate_day_trade_pdf(self, session: Dict[str, Any]) -> str:
+        """Gera PDF para uma sessão de day trade (tabela de entradas)."""
+        trade_date = str(session.get("trade_date") or "")
+        timestamp = datetime.now(BR_TZ)
+        safe_date = trade_date.replace("/", "-") if trade_date else timestamp.strftime("%Y-%m-%d")
+        filename = f"daytrade_{safe_date}_{timestamp.strftime('%Y%m%d_%H%M%S')}.pdf"
+        output_path = os.path.join(self.reports_dir, filename)
+
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle("ReportTitle", parent=styles["Title"], fontSize=22, leading=26, alignment=1))
+        styles.add(ParagraphStyle("SectionHeading", parent=styles["Heading2"], fontSize=14, leading=18))
+        styles.add(ParagraphStyle("InfoText", parent=styles["BodyText"], fontSize=10, leading=14))
+
+        story: List[Any] = []
+        self._add_institution_block(story, styles)
+        story.append(Paragraph("Relatório de Day Trade", styles["ReportTitle"]))
+        story.append(Spacer(1, 6 * mm))
+
+        tf_major = str(session.get("timeframe_major") or "-")
+        tf_minor = str(session.get("timeframe_minor") or "-")
+        risk_amount = session.get("risk_amount")
+        risk_percent = session.get("risk_percent")
+        meta = (
+            f"Sessão: <b>{trade_date or '-'}</b> • Timeframes: <b>{tf_major}</b> / <b>{tf_minor}</b> • "
+            f"Gerado em {timestamp.strftime('%d/%m/%Y %H:%M:%S')} (Horário de Brasília)."
+        )
+        story.append(Paragraph(meta, styles["InfoText"]))
+        if risk_amount is not None or risk_percent is not None:
+            risk_line = ""
+            if risk_amount is not None:
+                try:
+                    risk_line += f"Risco (R$): <b>{_fmt_price(float(risk_amount))}</b>"
+                except Exception:
+                    risk_line += f"Risco (R$): <b>{risk_amount}</b>"
+            if risk_percent is not None:
+                if risk_line:
+                    risk_line += " • "
+                try:
+                    risk_line += f"Risco (%): <b>{float(risk_percent):.2f}%</b>"
+                except Exception:
+                    risk_line += f"Risco (%): <b>{risk_percent}</b>"
+            if risk_line:
+                story.append(Spacer(1, 2 * mm))
+                story.append(Paragraph(risk_line, styles["InfoText"]))
+
+        story.append(Spacer(1, 6 * mm))
+        story.append(Paragraph("Entradas", styles["SectionHeading"]))
+        story.append(Spacer(1, 2 * mm))
+
+        entries = session.get("entries") or []
+        header = [
+            "Ativo",
+            "Dir",
+            "Entrada",
+            "Var. Max",
+            "Alvo",
+            "Stop",
+            "Alvo%",
+            "Stop%",
+        ]
+        rows: List[List[str]] = [header]
+        for entry in entries:
+            symbol = str(entry.get("symbol") or "-")
+            direction = str(entry.get("direction") or "-")
+            entry_price = entry.get("entry")
+            max_var = entry.get("max_entry_variation")
+            target = entry.get("target")
+            stop = entry.get("stop")
+            target_pct = entry.get("target_percent")
+            stop_pct = entry.get("stop_percent")
+
+            def _fmt_num(value: Any) -> str:
+                try:
+                    if value is None or value == "":
+                        return "-"
+                    return f"{float(value):.2f}"
+                except Exception:
+                    return str(value)
+
+            def _fmt_pct(value: Any) -> str:
+                try:
+                    if value is None or value == "":
+                        return "-"
+                    return f"{float(value):.2f}%"
+                except Exception:
+                    return str(value)
+
+            rows.append(
+                [
+                    symbol,
+                    direction,
+                    _fmt_num(entry_price),
+                    _fmt_pct(max_var),
+                    _fmt_num(target),
+                    _fmt_num(stop),
+                    _fmt_pct(target_pct),
+                    _fmt_pct(stop_pct),
+                ]
+            )
+
+        table = Table(rows, hAlign="LEFT", repeatRows=1)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8f9fa")]),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        story.append(table)
+
+        doc = SimpleDocTemplate(
+            output_path,
+            pagesize=A4,
+            leftMargin=18 * mm,
+            rightMargin=18 * mm,
+            topMargin=18 * mm,
+            bottomMargin=18 * mm,
+            title=f"Day Trade {trade_date}",
+            author=INSTITUTION_NAME,
+        )
+        try:
+            doc.build(story, onFirstPage=self._draw_footer, onLaterPages=self._draw_footer)
+            self._log.info("PDF gerado: %s", output_path)
+        except Exception:
+            self._log.error("Erro ao gerar PDF de day trade", exc_info=True)
+            raise
+
+        return output_path
+
+    def generate_portfolio_pdf(self, portfolio: Dict[str, Any]) -> str:
+        """Gera PDF para uma carteira (tabela de ativos + análise)."""
+        portfolio_type = str(portfolio.get("portfolio_type") or "CARTEIRA")
+        state = str(portfolio.get("state") or "-")
+        timestamp = datetime.now(BR_TZ)
+        filename = f"portfolio_{portfolio_type}_{timestamp.strftime('%Y%m%d_%H%M%S')}.pdf"
+        output_path = os.path.join(self.reports_dir, filename)
+
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle("ReportTitle", parent=styles["Title"], fontSize=22, leading=26, alignment=1))
+        styles.add(ParagraphStyle("SectionHeading", parent=styles["Heading2"], fontSize=14, leading=18))
+        styles.add(ParagraphStyle("InfoText", parent=styles["BodyText"], fontSize=10, leading=14))
+
+        story: List[Any] = []
+        self._add_institution_block(story, styles)
+        story.append(Paragraph(f"Carteira {portfolio_type}", styles["ReportTitle"]))
+        story.append(Spacer(1, 6 * mm))
+
+        start_date = portfolio.get("start_date")
+        end_date = portfolio.get("end_date")
+        version = portfolio.get("version")
+        meta_parts = [f"Estado: <b>{state}</b>"]
+        if version is not None:
+            meta_parts.append(f"Versão: <b>{version}</b>")
+        if start_date:
+            meta_parts.append(f"Período: <b>{start_date}</b> até <b>{end_date or '-'} </b>")
+        meta_parts.append(f"Gerado em {timestamp.strftime('%d/%m/%Y %H:%M:%S')} (Horário de Brasília).")
+        story.append(Paragraph(" • ".join(meta_parts), styles["InfoText"]))
+        story.append(Spacer(1, 6 * mm))
+
+        story.append(Paragraph("Ativos", styles["SectionHeading"]))
+        story.append(Spacer(1, 2 * mm))
+
+        assets = portfolio.get("assets") or []
+        header = ["Ativo", "Entrada", "Entrada Máx", "Risco Zero", "Alvo", "Stop"]
+        rows: List[List[str]] = [header]
+
+        def _fmt_num(value: Any) -> str:
+            try:
+                if value is None or value == "":
+                    return "-"
+                return f"{float(value):.2f}"
+            except Exception:
+                return str(value)
+
+        for asset in assets:
+            rows.append(
+                [
+                    str(asset.get("symbol") or "-"),
+                    _fmt_num(asset.get("entry")),
+                    _fmt_num(asset.get("entry_max")),
+                    _fmt_num(asset.get("risk_zero")),
+                    _fmt_num(asset.get("target")),
+                    _fmt_num(asset.get("stop")),
+                ]
+            )
+
+        table = Table(rows, hAlign="LEFT", repeatRows=1)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8f9fa")]),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        story.append(table)
+
+        analytical_text = str(portfolio.get("analytical_text") or "").strip()
+        if analytical_text:
+            story.append(Spacer(1, 6 * mm))
+            story.append(Paragraph("Análise", styles["SectionHeading"]))
+            story.append(Spacer(1, 2 * mm))
+            story.append(Paragraph(analytical_text, styles["InfoText"]))
+
+        doc = SimpleDocTemplate(
+            output_path,
+            pagesize=A4,
+            leftMargin=18 * mm,
+            rightMargin=18 * mm,
+            topMargin=18 * mm,
+            bottomMargin=18 * mm,
+            title=f"Carteira {portfolio_type}",
+            author=INSTITUTION_NAME,
+        )
+        try:
+            doc.build(story, onFirstPage=self._draw_footer, onLaterPages=self._draw_footer)
+            self._log.info("PDF gerado: %s", output_path)
+        except Exception:
+            self._log.error("Erro ao gerar PDF de carteira", exc_info=True)
             raise
 
         return output_path
@@ -165,6 +407,7 @@ class ReportGenerator:
         styles.add(ParagraphStyle("InfoText", parent=styles["BodyText"], fontSize=10, leading=14))
 
         story: List[Any] = []
+        self._add_institution_block(story, styles)
         story.append(Paragraph(f"Relatório de Operação - {operation.symbol}", styles["ReportTitle"]))
         story.append(Spacer(1, 6 * mm))
 
@@ -340,10 +583,24 @@ class ReportGenerator:
 
     def _draw_footer(self, canvas, doc) -> None:
         canvas.saveState()
-        footer_text = f"Página {doc.page}"
+        page_width, _ = doc.pagesize
         canvas.setFont("Helvetica", 9)
-        canvas.drawString(18 * mm, 12 * mm, footer_text)
+        canvas.drawString(18 * mm, 12 * mm, INSTITUTION_NAME)
+        canvas.drawRightString(page_width - 18 * mm, 12 * mm, f"Página {doc.page}")
         canvas.restoreState()
+
+    def _add_institution_block(self, story: List[Any], styles) -> None:
+        name = (INSTITUTION_NAME or "").strip()
+        text = (INSTITUTION_TEXT or "").strip()
+
+        if not name and not text:
+            return
+
+        if name:
+            story.append(Paragraph(f"<b>{name}</b>", styles["InfoText"]))
+        if text:
+            story.append(Paragraph(text, styles["InfoText"]))
+        story.append(Spacer(1, 4 * mm))
 
 
 __all__ = ["ReportGenerator"]

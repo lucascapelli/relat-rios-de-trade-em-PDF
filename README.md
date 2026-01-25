@@ -6,13 +6,14 @@ Sistema interno para geração de relatórios de trade em PDF.
 - Python (Flask)
 - SQLite
 - Plotly
-- WeasyPrint
+- ReportLab (PDF)
+- mplfinance/matplotlib (gráficos em PNG para o PDF)
 
 ## Funcionalidades
 - Formulário de operação
 - Cálculos automáticos
 - Gráficos de candle (4 timeframes)
-- Template PDF fixo
+- Geração de relatórios em PDF
 - Histórico simples
 - Configurações institucionais centralizadas
 

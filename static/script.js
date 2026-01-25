@@ -1529,7 +1529,8 @@ class TradingApp {
             }
         });
         
-        // Fetch price button
+        // Fetch price button - COMMENTED OUT (old Nova Operação section removed)
+        /* 
         document.getElementById('fetch-price-btn').addEventListener('click', async () => {
             const symbol = document.getElementById('operation-symbol').value.trim();
             if (symbol) {
@@ -1555,8 +1556,10 @@ class TradingApp {
                 }
             }
         });
+        */
         
-        // Operation form submit
+        // Operation form submit - COMMENTED OUT (old Nova Operação section removed)
+        /* 
         document.getElementById('operation-form').addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -1620,6 +1623,7 @@ class TradingApp {
                 submitBtn.disabled = false;
             }
         });
+        */
         
         // Real-time subscription button
         document.getElementById('subscribe-btn').addEventListener('click', () => {
@@ -1642,7 +1646,8 @@ class TradingApp {
             this.showToast('Histórico atualizado', 'info');
         });
         
-        // Auto-calculate operation values
+        // Auto-calculate operation values - COMMENTED OUT (old Nova Operação section removed)
+        /*
         [
             'operation-entrada-min',
             'operation-entrada',
@@ -1672,6 +1677,7 @@ class TradingApp {
         }
 
         this.calculateOperationSummary();
+        */
     }
     
     calculateOperationSummary() {

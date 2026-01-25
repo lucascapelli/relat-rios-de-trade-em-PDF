@@ -42,12 +42,13 @@ HEIGHT_BY_TF: Dict[str, int] = {
     "1m": 440,
     "5m": 430,
     "6m": 430,
-    "15m": 420,
-    "30m": 400,
-    "45m": 390,
-    "1h": 380,
-    "4h": 360,
-    "1d": 360,
+    "15m": 450,
+    "30m": 420,
+    "45m": 400,
+    "1h": 400,
+    "4h": 380,
+    "60m": 400,
+    "1d": 400,
     "1w": 360,
 }
 
@@ -126,6 +127,100 @@ OVERLAY_STYLE: Sequence[Tuple[str, str, str, str, float]] = (
     ("EMA_21", "MME 21", "#1E88E5", "dash", 1.4),
     ("EMA_200", "MME 200", "#D32F2F", "dash", 1.6),
 )
+
+
+def _debug_time_data(df: Optional[pd.DataFrame], name: str = "Dataframe") -> None:
+    """Emit logs sobre intervalo temporal para facilitar diagnósticos."""
+
+    if df is None or df.empty:
+        logger.warning("%s: Vazio ou None", name)
+        return
+
+    try:
+        first = df.index[0]
+        last = df.index[-1]
+        span = last - first
+        logger.info("%s: %s registros", name, len(df))
+        logger.info("%s: Primeiro índice=%s", name, first)
+        logger.info("%s: Último índice=%s", name, last)
+        logger.info("%s: Intervalo total=%s", name, span)
+
+        if hasattr(first, "year"):
+            years = getattr(df.index, "year", None)
+            if years is not None:
+                distinct_years = sorted(set(int(y) for y in years))
+                if len(distinct_years) > 3:
+                    logger.warning("%s: Muitos anos distintos detectados: %s", name, distinct_years)
+    except Exception:
+        logger.debug("Falha ao inspecionar dados temporais para %s", name, exc_info=True)
+
+
+def _mpl_locator_formatter(tf_key: str) -> Tuple[mdates.DateLocator, mdates.DateFormatter]:
+    """Return locator/formatter tuned for PDF exports without losing readability."""
+
+    tf = (tf_key or "").lower()
+
+    if tf in {"1m", "5m", "6m"}:
+        locator = mdates.HourLocator(interval=2)
+        formatter = mdates.DateFormatter("%d/%m %Hh")
+        return locator, formatter
+    
+    if tf in {"15m"}:
+        locator = mdates.HourLocator(interval=1)
+        formatter = mdates.DateFormatter("%d/%m %Hh")
+        return locator, formatter
+    
+    if tf in {"30m", "45m"}:
+        locator = mdates.HourLocator(interval=6)
+        formatter = mdates.DateFormatter("%d/%m %Hh")
+        return locator, formatter
+    
+    if tf in {"1h", "60m"}:
+        locator = mdates.HourLocator(interval=6)
+        formatter = mdates.DateFormatter("%d/%m %Hh")
+        return locator, formatter
+    
+    if tf in {"4h"}:
+        locator = mdates.DayLocator(interval=2)
+        formatter = mdates.DateFormatter("%d/%m")
+        return locator, formatter
+    
+    if tf in {"1d"}:
+        locator = mdates.DayLocator(interval=5)
+        formatter = mdates.DateFormatter("%d/%m")
+        return locator, formatter
+    
+    if tf in {"1w"}:
+        locator = mdates.WeekdayLocator(byweekday=mdates.MO, interval=4)
+        formatter = mdates.DateFormatter("%d/%m")
+        return locator, formatter
+
+    auto_locator = mdates.AutoDateLocator(minticks=3, maxticks=8)
+    return auto_locator, mdates.ConciseDateFormatter(auto_locator)
+
+
+_TIME_WINDOW_BY_TF: Dict[str, pd.Timedelta] = {
+    "1m": pd.Timedelta(hours=4),
+    "5m": pd.Timedelta(hours=8),
+    "6m": pd.Timedelta(hours=12),
+    "15m": pd.Timedelta(hours=4),
+    "30m": pd.Timedelta(days=2),
+    "45m": pd.Timedelta(days=3),
+    "1h": pd.Timedelta(days=1),
+    "60m": pd.Timedelta(days=1),
+    "4h": pd.Timedelta(days=7),
+    "1d": pd.Timedelta(days=30),
+}
+
+_MIN_CANDLES_FOR_WINDOW: Dict[str, int] = {
+    "15m": 16,
+    "30m": 20,
+    "45m": 15,
+    "1h": 12,
+    "60m": 12,
+    "4h": 15,
+    "1d": 20,
+}
 
 
 def prepare_ohlc_dataframe(
@@ -283,112 +378,220 @@ def render_price_chart_base64(
     height: Optional[int] = None,
     operation: Optional[Operation] = None,
 ) -> str:
+    axis_limits: Optional[Tuple[pd.Timestamp, pd.Timestamp]] = None
     try:
+        tf_key = (timeframe or "").lower()
+        
         normalized = prepare_ohlc_dataframe(df, timeframe)
+        logger.info(f"Dados normalizados: {len(normalized)} candles para {tf_key}")
+        _debug_time_data(normalized, "Dados Normalizados")
+        
         normalized = _tail_for_timeframe(normalized, timeframe)
+        logger.info(f"Após tail: {len(normalized)} candles")
+        
         enriched = _add_indicators(normalized)
-    except Exception as exc:
-        logger.error("Falha ao preparar dados do gráfico: %s", exc, exc_info=True)
-        return ""
+        logger.info(f"Após indicadores: {len(enriched)} candles")
+        _debug_time_data(enriched, "Dados após tail e indicadores")
+        if not enriched.empty:
+            logger.info("Intervalo temporal: %s até %s", enriched.index[0], enriched.index[-1])
+            time_span = enriched.index[-1] - enriched.index[0]
+            logger.info("Span temporal total: %s", time_span)
+            if getattr(time_span, "days", 0) > 365:
+                logger.error("Span temporal muito grande: %s dias", time_span.days)
+                max_candles = MAX_BARS_BY_TF.get(tf_key, 200)
+                enriched = enriched.tail(max_candles)
+                logger.info("Forçado tail para %s candles", len(enriched))
+                _debug_time_data(enriched, "Dados após correção de span")
 
-    if len(enriched.index) < 2:
-        return ""
+        window = _TIME_WINDOW_BY_TF.get(tf_key)
+        
+        if window is not None and not enriched.empty and len(enriched) > 5:
+            try:
+                end_ts = pd.Timestamp(enriched.index[-1])
+                start_ts = end_ts - window
+                if start_ts < enriched.index[0]:
+                    start_ts = enriched.index[0]
+                window_df = enriched.loc[enriched.index >= start_ts]
+                min_required = _MIN_CANDLES_FOR_WINDOW.get(tf_key, 15)
 
-    plot_df = enriched.rename(
-        columns={"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
-    )
+                logger.info("Janela calculada: %s a %s", start_ts, end_ts)
+                logger.info("Candles na janela: %s", len(window_df))
 
-    addplots: List = []
-    legend_entries: List[Tuple[str, str, str, float]] = []
-    for column, label, color, linestyle, width_line in OVERLAY_STYLE:
-        if column in plot_df and plot_df[column].notna().any():
-            series = plot_df[column].dropna()
-            if len(series.index) >= 2:
-                addplots.append(
-                    mpf.make_addplot(series, color=color, linestyle=linestyle.replace("dash", "--"), width=width_line)
-                )
-                legend_entries.append((label, color, linestyle.replace("dash", "--"), width_line))
+                if len(window_df) >= min_required:
+                    enriched = window_df
+                    axis_limits = (window_df.index[0], window_df.index[-1])
+                    logger.info("Usando janela temporal de %s candles", len(window_df))
+                else:
+                    if tf_key in INTRADAY_SET:
+                        fallback_count = max(min_required * 2, 30)
+                    else:
+                        fallback_count = max(min_required, 20)
 
-    market_colors = mpf.make_marketcolors(
-        up="#26a69a",
-        down="#ef5350",
-        edge="inherit",
-        wick="inherit",
-    )
-    style = mpf.make_mpf_style(
-        base_mpf_style="yahoo",
-        marketcolors=market_colors,
-        facecolor="white",
-        figcolor="white",
-    )
+                    if len(enriched) >= fallback_count:
+                        enriched = enriched.tail(fallback_count)
+                    axis_limits = None
+                    logger.info("Usando fallback: %s candles", len(enriched))
+            except Exception as e:
+                logger.warning(f"Erro ao aplicar janela temporal para {tf_key}: {e}")
+                # Em caso de erro, use todo o dataset disponível
+                max_candles = MAX_BARS_BY_TF.get(tf_key, 200)
+                enriched = enriched.tail(max_candles)
+                axis_limits = None
 
-    tf_key = (timeframe or "").lower()
-    show_nontrading = tf_key in {"1d", "1w"}
-    show_volume = bool("Volume" in plot_df.columns and plot_df["Volume"].notna().any())
+        if not enriched.empty:
+            final_span = enriched.index[-1] - enriched.index[0]
+            total_hours = final_span.total_seconds() / 3600 if hasattr(final_span, "total_seconds") else 0.0
+            logger.info(
+                "Span temporal final: %s dias e %.2f horas",
+                final_span.days,
+                total_hours,
+            )
 
-    last_update = enriched.index[-1] if not enriched.empty else None
-    footer = ""
-    if last_update is not None:
-        try:
-            footer = f"Atualizado: {pd.Timestamp(last_update).strftime('%d/%m/%Y %H:%M')} (BRT)"
-        except Exception:
-            footer = f"Atualizado: {last_update}"
-
-    fig, axes = mpf.plot(
-        plot_df,
-        type="candle",
-        style=style,
-        addplot=addplots or None,
-        volume=show_volume,
-        title=title,
-        ylabel="Preço (R$)",
-        ylabel_lower="Volume" if show_volume else "",
-        figsize=(width / 100, (height or DEFAULT_HEIGHT) / 100),
-        returnfig=True,
-        show_nontrading=show_nontrading,
-        datetime_format=DATE_FORMAT_BY_TF.get(tf_key, "%d/%m %H:%M"),
-    )
-
-    ax = axes[0] if isinstance(axes, (list, tuple, np.ndarray)) else axes
-
-    locator = mdates.AutoDateLocator(minticks=4, maxticks=9)
-    ax.xaxis.set_major_locator(locator)
-    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
-
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
-
-    if legend_entries:
-        handles = [
-            Line2D([], [], color=color, linestyle=linestyle, linewidth=width_line, label=label)
-            for label, color, linestyle, width_line in legend_entries
-        ]
-        ax.legend(handles=handles, loc="upper left", frameon=False, fontsize=8)
-
-    if operation is not None:
-        _draw_operation_levels(ax, plot_df, operation)
-
-    if footer:
-        try:
-            fig.text(0.99, 0.01, footer, ha="right", va="bottom", fontsize=7, color="#4b5563")
-        except Exception:
-            logger.debug("Falha ao adicionar rodapé de atualização", exc_info=True)
-
-    # mplfinance cria eixos extras (ex: volume) que nem sempre são compatíveis com tight_layout.
-    try:
-        if not show_volume:
-            fig.tight_layout()
+        # Cálculo dinâmico de max_ticks baseado no número de candles
+        num_candles = len(enriched)
+        if num_candles > 100:
+            dynamic_max_ticks = max(5, int(num_candles / 20))
+        elif num_candles > 50:
+            dynamic_max_ticks = 8
         else:
-            fig.subplots_adjust(top=0.90, bottom=0.10)
-    except Exception:
-        logger.debug("Falha ao ajustar layout do gráfico", exc_info=True)
+            dynamic_max_ticks = 12
 
-    buffer = io.BytesIO()
-    # Evita bbox_inches='tight' aqui para não gerar imagens gigantes em casos extremos.
-    fig.savefig(buffer, format="png", dpi=160)
-    plt.close(fig)
+        plot_df = enriched.rename(
+            columns={"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
+        )
 
-    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
-    return "data:image/png;base64," + encoded
+        addplots: List = []
+        legend_entries: List[Tuple[str, str, str, float]] = []
+        for column, label, color, linestyle, width_line in OVERLAY_STYLE:
+            if column in plot_df and plot_df[column].notna().any():
+                series = plot_df[column].dropna()
+                if len(series.index) >= 2:
+                    addplots.append(
+                        mpf.make_addplot(
+                            series,
+                            color=color,
+                            linestyle=linestyle.replace("dash", "--"),
+                            width=width_line,
+                        )
+                    )
+                    legend_entries.append((label, color, linestyle.replace("dash", "--"), width_line))
+
+        market_colors = mpf.make_marketcolors(
+            up="#26a69a",
+            down="#ef5350",
+            edge="inherit",
+            wick="inherit",
+        )
+        style = mpf.make_mpf_style(
+            base_mpf_style="yahoo",
+            marketcolors=market_colors,
+            facecolor="white",
+            figcolor="white",
+        )
+
+        show_nontrading = tf_key in {"1d", "1w"}
+        show_volume = bool("Volume" in plot_df.columns and plot_df["Volume"].notna().any())
+
+        last_update = enriched.index[-1] if not enriched.empty else None
+        footer = ""
+        if last_update is not None:
+            try:
+                footer = f"Atualizado: {pd.Timestamp(last_update).strftime('%d/%m/%Y %H:%M')} (BRT)"
+            except Exception:
+                footer = f"Atualizado: {last_update}"
+
+        fig, axes = mpf.plot(
+            plot_df,
+            type="candle",
+            style=style,
+            addplot=addplots or None,
+            volume=show_volume,
+            title=title,
+            ylabel="Preço (R$)",
+            ylabel_lower="Volume" if show_volume else "",
+            figsize=(width / 100, (height or DEFAULT_HEIGHT) / 100),
+            returnfig=True,
+            show_nontrading=show_nontrading,
+            datetime_format=DATE_FORMAT_BY_TF.get(tf_key, "%d/%m %H:%M"),
+        )
+
+        ax = axes[0] if isinstance(axes, (list, tuple, np.ndarray)) else axes
+
+        locator, formatter = _mpl_locator_formatter(tf_key)
+        ax.xaxis.set_major_locator(locator)
+        ax.xaxis.set_major_formatter(formatter)
+
+        tick_labels = ax.get_xticklabels()
+        logger.info("Total de ticks gerados: %s para timeframe %s", len(tick_labels), tf_key)
+        
+        for label in tick_labels:
+            label.set_rotation(90)
+            label.set_horizontalalignment("center")
+            label.set_fontsize(7)
+
+        # Controle adaptativo de visibilidade baseado no timeframe e número de candles
+        if tf_key in {"1d"}:
+            max_ticks = 10
+        elif tf_key in {"1h", "60m"}:
+            max_ticks = 8
+        elif tf_key in {"1w"}:
+            max_ticks = 8
+        else:
+            max_ticks = min(dynamic_max_ticks, 8)
+
+        if len(tick_labels) > max_ticks:
+            step = int(np.ceil(len(tick_labels) / max_ticks))
+            visible_count = 0
+            for idx, label in enumerate(tick_labels):
+                is_visible = (idx % step == 0)
+                label.set_visible(is_visible)
+                if is_visible:
+                    visible_count += 1
+            logger.info("Ticks visíveis após filtro: %s de %s (step=%s)", visible_count, len(tick_labels), step)
+
+        plt.setp(ax.xaxis.get_minorticklabels(), visible=False)
+
+        if legend_entries:
+            handles = [
+                Line2D([], [], color=color, linestyle=linestyle, linewidth=width_line, label=label)
+                for label, color, linestyle, width_line in legend_entries
+            ]
+            ax.legend(handles=handles, loc="upper left", frameon=False, fontsize=8)
+
+        if axis_limits is not None:
+            start_ts, end_ts = axis_limits
+            if end_ts > start_ts:
+                ax.set_xlim(start_ts, end_ts)
+
+        if operation is not None:
+            _draw_operation_levels(ax, plot_df, operation)
+
+        if footer:
+            try:
+                fig.text(0.99, 0.01, footer, ha="right", va="bottom", fontsize=7, color="#4b5563")
+            except Exception:
+                logger.debug("Falha ao adicionar rodapé de atualização", exc_info=True)
+
+        # mplfinance cria eixos extras (ex: volume) que nem sempre são compatíveis com tight_layout.
+        try:
+            if not show_volume:
+                fig.subplots_adjust(top=0.92, bottom=0.15, left=0.08, right=0.95)
+            else:
+                fig.subplots_adjust(top=0.90, bottom=0.15, left=0.08, right=0.95)
+        except Exception:
+            logger.debug("Falha ao ajustar layout do gráfico", exc_info=True)
+
+        buffer = io.BytesIO()
+        # Evita bbox_inches='tight' aqui para não gerar imagens gigantes em casos extremos.
+        fig.savefig(buffer, format="png", dpi=160)
+        plt.close(fig)
+
+        encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        return "data:image/png;base64," + encoded
+
+    except Exception as exc:
+        logger.exception("Erro ao renderizar gráfico de preço", exc_info=True)
+        raise
 
 
 def _draw_operation_levels(ax, df: pd.DataFrame, operation: Operation) -> None:

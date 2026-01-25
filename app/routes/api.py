@@ -99,6 +99,43 @@ def register_api_routes(app, services: Services) -> None:
     database = services.database
     report_generator = services.report_generator
 
+    def _parse_iso_date(value: Optional[str]):
+        from datetime import datetime
+
+        if not value:
+            return None
+        try:
+            return datetime.strptime(str(value), "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    def _get_period_range(period_raw: str, reference_date_raw: Optional[str]):
+        from datetime import date, timedelta
+        import calendar
+
+        period_norm = (period_raw or "").strip().lower()
+        if period_norm in {"semanal", "semana", "weekly", "week", "w"}:
+            period_norm = "weekly"
+        elif period_norm in {"mensal", "mes", "mês", "monthly", "month", "m"}:
+            period_norm = "monthly"
+        elif period_norm in {"geral", "all", "range", "custom"}:
+            period_norm = "range"
+
+        ref = _parse_iso_date(reference_date_raw) or date.today()
+
+        if period_norm == "weekly":
+            start = ref - timedelta(days=ref.weekday())
+            end = start + timedelta(days=6)
+            return period_norm, start, end
+
+        if period_norm == "monthly":
+            start = ref.replace(day=1)
+            last_day = calendar.monthrange(ref.year, ref.month)[1]
+            end = ref.replace(day=last_day)
+            return period_norm, start, end
+
+        return "range", ref, ref
+
     @bp.route("/")
     def index():
         symbols = ["PETR4", "VALE3", "ITUB4", "BBDC4"]
@@ -460,4 +497,370 @@ def register_api_routes(app, services: Services) -> None:
     def serve_report(filename: str):
         return send_from_directory(str(REPORTS_DIR), filename)
 
+    # ========== SWING TRADE ROUTES ==========
+    @bp.route("/api/swing-trade", methods=["POST"])
+    def api_swing_trade():
+        try:
+            data = request.get_json() or {}
+            from datetime import datetime
+            from ..config import BR_TZ
+
+            swing_data = {
+                "symbol": data.get("symbol", "").upper(),
+                "direction": data.get("direction", "LONG").upper(),
+                "entry": float(data.get("entry", 0)),
+                "entry_min": float(data.get("entry_min", data.get("entry", 0))),
+                "entry_max": float(data.get("entry_max", data.get("entry", 0))),
+                "target": float(data.get("target", 0)),
+                "stop": float(data.get("stop", 0)),
+                "quantity": int(data.get("quantity", 1)),
+                "trade_date": data.get("trade_date", datetime.now(BR_TZ).strftime("%Y-%m-%d")),
+                "timeframe_major": data.get("timeframe_major", "1d"),
+                "timeframe_minor": data.get("timeframe_minor", "1h"),
+                "risk_amount": data.get("risk_amount"),
+                "risk_percent": data.get("risk_percent"),
+                "target_percent": data.get("target_percent"),
+                "stop_percent": data.get("stop_percent"),
+                "analytical_text": data.get("analytical_text", ""),
+                "client_name": data.get("client_name"),
+                "status": "ABERTA",
+                "created_at": datetime.now(BR_TZ).isoformat(),
+            }
+
+            trade_id = database.insert_swing_trade(swing_data)
+
+            return jsonify({"id": trade_id, "status": "success", "message": "Swing trade registrado com sucesso"})
+        except Exception as exc:
+            logger.error(f"Erro ao registrar swing trade: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    @bp.route("/api/swing-trade/list", methods=["GET"])
+    def api_swing_trade_list():
+        try:
+            trades = database.get_swing_trades(limit=100)
+            return jsonify(trades)
+        except Exception as exc:
+            logger.error(f"Erro ao listar swing trades: {exc}")
+            return jsonify([])
+
+    # ========== DAY TRADE ROUTES ==========
+    @bp.route("/api/day-trade", methods=["POST"])
+    def api_day_trade():
+        try:
+            data = request.get_json() or {}
+            from datetime import datetime
+            from ..config import BR_TZ
+
+            session_data = {
+                "trade_date": data.get("trade_date", datetime.now(BR_TZ).strftime("%Y-%m-%d")),
+                "timeframe_major": data.get("timeframe_major", "1h"),
+                "timeframe_minor": data.get("timeframe_minor", "15m"),
+                "risk_amount": data.get("risk_amount"),
+                "risk_percent": data.get("risk_percent"),
+                "created_at": datetime.now(BR_TZ).isoformat(),
+            }
+
+            entries = data.get("entries", [])
+            session_id = database.insert_day_trade_session(session_data, entries)
+            return jsonify({"id": session_id, "status": "success", "message": "Day trade registrado com sucesso"})
+        except Exception as exc:
+            logger.error(f"Erro ao registrar day trade: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    @bp.route("/api/day-trade/list", methods=["GET"])
+    def api_day_trade_list():
+        try:
+            sessions = database.get_day_trade_sessions(limit=100)
+            return jsonify(sessions)
+        except Exception as exc:
+            logger.error(f"Erro ao listar day trades: {exc}")
+            return jsonify([])
+
+    # ========== PORTFOLIO ROUTES ==========
+    @bp.route("/api/portfolio", methods=["POST"])
+    def api_portfolio():
+        try:
+            data = request.get_json() or {}
+            from datetime import datetime
+            from ..config import BR_TZ
+            
+            portfolio_data = {
+                "portfolio_type": data.get("portfolio_type", "GERAL"),
+                "state": data.get("state", "CONSTRUIR"),
+                "start_date": data.get("start_date"),
+                "end_date": data.get("end_date"),
+                "analytical_text": data.get("analytical_text", ""),
+                "version": data.get("version", 1),
+                "created_at": datetime.now(BR_TZ).isoformat()
+            }
+            
+            assets = data.get("assets", [])
+            
+            portfolio_id = database.insert_portfolio(portfolio_data, assets)
+            
+            return jsonify({
+                "id": portfolio_id,
+                "status": "success",
+                "message": "Carteira registrada com sucesso"
+            })
+        except Exception as exc:
+            logger.error(f"Erro ao registrar carteira: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    @bp.route("/api/portfolio/list", methods=["GET"])
+    def api_portfolio_list():
+        try:
+            portfolios = database.get_portfolios(limit=100)
+            return jsonify(portfolios)
+        except Exception as exc:
+            logger.error(f"Erro ao listar carteiras: {exc}")
+            return jsonify([])
+
+    @bp.route("/api/portfolio/manipulated", methods=["GET"])
+    def api_portfolio_manipulated_assets():
+        """List assets manipulated in Day Trade and Swing Trade for a period."""
+        try:
+            period = request.args.get("period", default="weekly", type=str)
+            reference_date = request.args.get("reference_date", default=None, type=str)
+            include_swing = request.args.get("include_swing", default="1", type=str) != "0"
+            include_daytrade = request.args.get("include_daytrade", default="1", type=str) != "0"
+
+            period_norm, start_d, end_d = _get_period_range(period, reference_date)
+            start_date = start_d.strftime("%Y-%m-%d")
+            end_date = end_d.strftime("%Y-%m-%d")
+
+            assets = database.get_manipulated_assets(
+                start_date=start_date,
+                end_date=end_date,
+                include_swing=include_swing,
+                include_daytrade=include_daytrade,
+            )
+
+            return jsonify(
+                {
+                    "period": period_norm,
+                    "reference_date": reference_date,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "assets": assets,
+                }
+            )
+        except Exception as exc:
+            logger.error(f"Erro ao listar ativos manipulados: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    @bp.route("/api/portfolio/manipulated/pdf", methods=["POST"])
+    def api_portfolio_manipulated_pdf():
+        """Generate a portfolio PDF based on manipulated assets (no DB persistence)."""
+        try:
+            data = request.get_json() or {}
+            period = str(data.get("period") or "weekly")
+            reference_date = data.get("reference_date")
+            include_swing = bool(data.get("include_swing", True))
+            include_daytrade = bool(data.get("include_daytrade", True))
+            analytical_text = str(data.get("analytical_text") or "")
+
+            period_norm, start_d, end_d = _get_period_range(period, reference_date)
+            start_date = start_d.strftime("%Y-%m-%d")
+            end_date = end_d.strftime("%Y-%m-%d")
+
+            assets = database.get_manipulated_assets(
+                start_date=start_date,
+                end_date=end_date,
+                include_swing=include_swing,
+                include_daytrade=include_daytrade,
+            )
+
+            portfolio_payload = {
+                "portfolio_type": "SEMANAL" if period_norm == "weekly" else "MENSAL" if period_norm == "monthly" else "GERAL",
+                "state": "DERIVADA",
+                "start_date": start_date,
+                "end_date": end_date,
+                "version": 1,
+                "analytical_text": analytical_text,
+                "assets": [
+                    {
+                        "symbol": a.get("symbol"),
+                        "entry": a.get("entry"),
+                        "entry_max": a.get("entry_max"),
+                        "risk_zero": a.get("risk_zero"),
+                        "target": a.get("target"),
+                        "stop": a.get("stop"),
+                    }
+                    for a in assets
+                ],
+            }
+
+            pdf_path = report_generator.generate_portfolio_pdf(portfolio_payload)
+
+            return jsonify(
+                {
+                    "status": "success",
+                    "filename": os.path.basename(pdf_path),
+                    "url": f"/reports/{os.path.basename(pdf_path)}",
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "count": len(assets),
+                }
+            )
+        except Exception as exc:
+            logger.error(f"Erro ao gerar PDF de carteira derivada: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    @bp.route("/api/swing-trade/<int:trade_id>/pdf", methods=["GET"])
+    def api_swing_trade_pdf(trade_id):
+        """Generate PDF for a specific swing trade"""
+        try:
+            trade = database.get_swing_trade(int(trade_id))
+            if not trade:
+                return jsonify({"error": "Trade não encontrado"}), 404
+
+            from ..models import Operation
+
+            direction = str(trade.get("direction") or "LONG").upper()
+            tipo = "COMPRA" if direction == "LONG" else "VENDA"
+            op = Operation(
+                symbol=str(trade.get("symbol") or "").upper(),
+                tipo=tipo,
+                entrada=float(trade.get("entry") or 0),
+                stop=float(trade.get("stop") or 0),
+                alvo=float(trade.get("target") or 0),
+                quantidade=int(trade.get("quantity") or 1),
+                timeframe=str(trade.get("timeframe_minor") or "1h"),
+                entrada_min=float(trade.get("entry_min") or trade.get("entry") or 0),
+                entrada_max=float(trade.get("entry_max") or trade.get("entry") or 0),
+                observacoes=str(trade.get("analytical_text") or ""),
+            )
+
+            # Try to enrich with current price (non-fatal)
+            try:
+                info = finance_data.get_ticker_info(op.symbol)
+                if info and getattr(info, "price", None):
+                    op.preco_atual = float(info.price)
+            except Exception:
+                pass
+
+            def _normalize_tf(value: Any) -> str:
+                raw = (str(value or "").strip().lower())
+                mapping = {
+                    "60m": "1h",
+                    "60min": "1h",
+                    "1hour": "1h",
+                    "daily": "1d",
+                    "diario": "1d",
+                    "weekly": "1w",
+                    "semanal": "1w",
+                }
+                return mapping.get(raw, raw)
+
+            base_tfs = ["15m", "1h", "1d"]
+            major = _normalize_tf(trade.get("timeframe_major"))
+            minor = _normalize_tf(trade.get("timeframe_minor"))
+            tfs: List[str] = []
+            for tf in [minor, major, *base_tfs]:
+                if tf and tf not in tfs:
+                    tfs.append(tf)
+
+            chart_images: List[Dict[str, Any]] = []
+            for tf in tfs:
+                try:
+                    df_raw = finance_data.get_candles(op.symbol, tf, 150)
+                    df_norm = ChartGenerator.prepare_ohlc_dataframe(df_raw, tf)
+                    df_norm = ChartGenerator._ensure_overlay_columns(df_norm)
+                    title = f"{op.symbol} • {format_timeframe_label(tf)}"
+                    image_b64 = chart_generator.generate_chart_image(df_norm, title, timeframe=tf, operation=op)
+
+                    source_raw = df_norm.attrs.get("source", df_raw.attrs.get("source", "unknown"))
+                    source = source_raw
+                    if isinstance(source_raw, str) and source_raw.lower().startswith("fallback"):
+                        source = "fallback"
+
+                    last_time = None
+                    last_close = None
+                    if not df_norm.empty:
+                        try:
+                            last_time = pd.Timestamp(df_norm.index[-1]).strftime("%d/%m/%Y %H:%M")
+                        except Exception:
+                            last_time = str(df_norm.index[-1])
+                        try:
+                            last_close = float(df_norm["close"].iloc[-1]) if "close" in df_norm.columns else None
+                        except Exception:
+                            last_close = None
+
+                    chart_images.append(
+                        {
+                            "timeframe": tf,
+                            "image": image_b64,
+                            "source": source,
+                            "last_time": last_time,
+                            "last_close": last_close,
+                        }
+                    )
+                except Exception as exc:
+                    logger.warning(f"Falha ao gerar chart para swing trade {op.symbol} {tf}: {exc}")
+
+            pdf_path = report_generator.generate_pdf_report(op, chart_images)
+            database.update_swing_trade_pdf(int(trade_id), pdf_path)
+
+            return jsonify(
+                {
+                    "status": "success",
+                    "filename": os.path.basename(pdf_path),
+                    "url": f"/reports/{os.path.basename(pdf_path)}",
+                }
+            )
+            
+        except Exception as exc:
+            logger.error(f"Erro ao gerar PDF de swing trade: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    @bp.route("/api/day-trade/<int:session_id>/pdf", methods=["GET"])
+    def api_day_trade_pdf(session_id):
+        """Generate PDF for a specific day trade session"""
+        try:
+            session = database.get_day_trade_session(int(session_id))
+            
+            if not session:
+                return jsonify({"error": "Sessão não encontrada"}), 404
+
+            pdf_path = report_generator.generate_day_trade_pdf(session)
+            database.update_day_trade_session_pdf(int(session_id), pdf_path)
+
+            return jsonify(
+                {
+                    "status": "success",
+                    "filename": os.path.basename(pdf_path),
+                    "url": f"/reports/{os.path.basename(pdf_path)}",
+                }
+            )
+            
+        except Exception as exc:
+            logger.error(f"Erro ao gerar PDF de day trade: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    @bp.route("/api/portfolio/<int:portfolio_id>/pdf", methods=["GET"])
+    def api_portfolio_pdf(portfolio_id):
+        """Generate PDF for a specific portfolio"""
+        try:
+            portfolio = database.get_portfolio(int(portfolio_id))
+            
+            if not portfolio:
+                return jsonify({"error": "Carteira não encontrada"}), 404
+
+            pdf_path = report_generator.generate_portfolio_pdf(portfolio)
+            database.update_portfolio_pdf(int(portfolio_id), pdf_path)
+
+            return jsonify(
+                {
+                    "status": "success",
+                    "filename": os.path.basename(pdf_path),
+                    "url": f"/reports/{os.path.basename(pdf_path)}",
+                }
+            )
+            
+        except Exception as exc:
+            logger.error(f"Erro ao gerar PDF de carteira: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
     app.register_blueprint(bp)
+

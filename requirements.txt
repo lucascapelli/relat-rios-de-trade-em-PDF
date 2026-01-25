@@ -1,11 +1,10 @@
 Flask
 plotly
-weasyprint
 pandas
 kaleido
 yfinance
 mplfinance
-flask-socketio 
+flask-socketio
 eventlet
 reportlab
 pandas_ta

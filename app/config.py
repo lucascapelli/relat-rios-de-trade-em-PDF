@@ -2,6 +2,7 @@
 from __future__ import annotations
 import pandas as pd
 
+import importlib.util
 import os
 from pathlib import Path
 import pytz
@@ -56,6 +57,38 @@ CHART_CACHE_EXPIRY = 15
 # Flask settings
 DEFAULT_SECRET_KEY = "sua-chave-secreta-aqui"
 
+# Institution / branding (can be overridden by project-root config.py)
+DEFAULT_INSTITUTION_NAME = "Relatórios Trade"
+DEFAULT_LOGO_PATH = "static/logo.png"
+DEFAULT_INSTITUTION_TEXT = ""
+
+
+def _load_external_institution_config(project_root: Path) -> dict:
+    external_path = project_root / "config.py"
+    if not external_path.exists() or not external_path.is_file():
+        return {}
+
+    try:
+        spec = importlib.util.spec_from_file_location("relatoriostrade_external_config", external_path)
+        if spec is None or spec.loader is None:
+            return {}
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return {
+            "INSTITUTION_NAME": getattr(module, "INSTITUTION_NAME", None),
+            "LOGO_PATH": getattr(module, "LOGO_PATH", None),
+            "INSTITUTION_TEXT": getattr(module, "INSTITUTION_TEXT", None),
+        }
+    except Exception:
+        return {}
+
+
+_external_institution = _load_external_institution_config(PROJECT_ROOT)
+
+INSTITUTION_NAME = str(_external_institution.get("INSTITUTION_NAME") or DEFAULT_INSTITUTION_NAME)
+LOGO_PATH = str(_external_institution.get("LOGO_PATH") or DEFAULT_LOGO_PATH)
+INSTITUTION_TEXT = str(_external_institution.get("INSTITUTION_TEXT") or DEFAULT_INSTITUTION_TEXT)
+
 __all__ = [
     "PACKAGE_ROOT",
     "PROJECT_ROOT",
@@ -71,4 +104,7 @@ __all__ = [
     "PRICE_CACHE_EXPIRY",
     "CHART_CACHE_EXPIRY",
     "DEFAULT_SECRET_KEY",
+    "INSTITUTION_NAME",
+    "LOGO_PATH",
+    "INSTITUTION_TEXT",
 ]

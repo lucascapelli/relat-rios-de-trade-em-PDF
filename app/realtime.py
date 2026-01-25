@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import re
 from datetime import datetime
 from typing import Dict, Optional, Set
 
@@ -23,9 +24,19 @@ class RealTimeManager:
         self.running = False
 
     def _normalize_symbol(self, symbol: str) -> str:
-        if symbol and not symbol.endswith(".SA") and symbol[-1].isdigit():
-            return f"{symbol}.SA"
-        return symbol
+        if not symbol:
+            return symbol
+
+        normalized = symbol.strip().upper()
+        if normalized.endswith(".SA") or "." in normalized:
+            return normalized
+
+        # Only suffix .SA for common B3 equity/ETF tickers like PETR4 / VALE3 / BOVA11.
+        # Avoid breaking futures like WING26 / WDOG26.
+        if re.match(r"^[A-Z]{4}\d{1,2}$", normalized):
+            return f"{normalized}.SA"
+
+        return normalized
 
     def update_symbol(self, symbol: str) -> Optional[TickerInfo]:
         try:

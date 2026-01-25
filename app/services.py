@@ -13,13 +13,14 @@ from .reports import ReportGenerator
 
 @dataclass
 class Services:
-	finance_data: FinanceData
-	chart_generator: ChartGenerator
-	database: Database
-	report_generator: ReportGenerator
-	realtime_manager: RealTimeManager
-	price_cache: CacheManager
-	chart_cache: CacheManager
+
+    finance_data: FinanceData
+    chart_generator: ChartGenerator
+    database: Database
+    report_generator: ReportGenerator
+    realtime_manager: RealTimeManager
+    price_cache: CacheManager
+    chart_cache: CacheManager
 
 
 __all__ = ["Services"]

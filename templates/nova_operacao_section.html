@@ -1,0 +1,453 @@
+<!-- Nova Operação Section - Unified (Swing Trade, Day Trade, Carteiras) -->
+<section id="operation-section" class="section" style="display: none;">
+    <div class="container-fluid">
+        <!-- Mode Selector -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="btn-group w-100" role="group" id="operation-mode-selector">
+                            <input type="radio" class="btn-check" name="operation-mode" id="mode-swing" autocomplete="off" checked>
+                            <label class="btn btn-outline-primary" for="mode-swing">
+                                <i class="fas fa-chart-line me-2"></i>Swing Trade
+                            </label>
+
+                            <input type="radio" class="btn-check" name="operation-mode" id="mode-daytrade" autocomplete="off">
+                            <label class="btn btn-outline-success" for="mode-daytrade">
+                                <i class="fas fa-bolt me-2"></i>Day Trade
+                            </label>
+
+                            <input type="radio" class="btn-check" name="operation-mode" id="mode-portfolio" autocomplete="off">
+                            <label class="btn btn-outline-info" for="mode-portfolio">
+                                <i class="fas fa-briefcase me-2"></i>Carteiras
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Global Filters -->
+        <div class="row mb-4 justify-content-center">
+            <div class="col-lg-10">
+                <div class="card">
+                    <div class="card-body">
+                        <h6 class="card-title"><i class="fas fa-filter me-2"></i>Filtros Globais</h6>
+                        <div class="row">
+                            <div class="col-md-6 mb-2">
+                                <label class="form-label">Índice</label>
+                                <select class="form-select form-select-sm" id="filter-index">
+                                    <option value="ALL">Todos</option>
+                                    <option value="IBX100">IBX-100</option>
+                                    <option value="IBOV">IBOVESPA</option>
+                                    <option value="IDIV">IDIV</option>
+                                    <option value="SMLL">SMLL</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label class="form-label">Classe de Ativo</label>
+                                <select class="form-select form-select-sm" id="filter-asset-class">
+                                    <option value="ALL">Todas</option>
+                                    <option value="ACOES">Ações</option>
+                                    <option value="DOLAR">Dólar</option>
+                                    <option value="INDICE">Índice</option>
+                                    <option value="BITCOIN">Bitcoin</option>
+                                    <option value="SP500">S&P500</option>
+                                    <option value="BOI">Boi</option>
+                                    <option value="MILHO">Milho</option>
+                                    <option value="CUSTOM">Lista Personalizada</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== SWING TRADE MODE ========== -->
+        <div id="swing-trade-container" class="mode-container">
+            <div class="row justify-content-center">
+                <div class="col-lg-10">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i>Swing Trade</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="swing-trade-form">
+                                <!-- Ticker and Direction -->
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label">Ativo <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="swing-symbol" required>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Direção <span class="text-danger">*</span></label>
+                                        <select class="form-select" id="swing-direction" required>
+                                            <option value="LONG">Long (Compra)</option>
+                                            <option value="SHORT">Short (Venda)</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Entry Prices -->
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label">Entrada Mínima</label>
+                                        <input type="number" step="0.01" class="form-control" id="swing-entry-min">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Entrada <span class="text-danger">*</span></label>
+                                        <input type="number" step="0.01" class="form-control" id="swing-entry" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Entrada Máxima</label>
+                                        <input type="number" step="0.01" class="form-control" id="swing-entry-max">
+                                    </div>
+                                </div>
+
+                                <!-- Target and Stop -->
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label">Objetivo <span class="text-danger">*</span></label>
+                                        <input type="number" step="0.01" class="form-control" id="swing-target" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Stop <span class="text-danger">*</span></label>
+                                        <input type="number" step="0.01" class="form-control" id="swing-stop" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Quantidade <span class="text-danger">*</span></label>
+                                        <input type="number" class="form-control" id="swing-quantity" value="100" required>
+                                    </div>
+                                </div>
+
+                                <!-- Date and Timeframes -->
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label">Data do Trade</label>
+                                        <input type="date" class="form-control" id="swing-trade-date">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Timeframe Maior</label>
+                                        <select class="form-select" id="swing-tf-major">
+                                            <option value="1d" selected>1 Dia</option>
+                                            <option value="4h">4 Horas</option>
+                                            <option value="1h">1 Hora</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Timeframe Menor</label>
+                                        <select class="form-select" id="swing-tf-minor">
+                                            <option value="1h" selected>1 Hora</option>
+                                            <option value="15m">15 Minutos</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Risk Management -->
+                                <div class="card bg-light mb-3">
+                                    <div class="card-body">
+                                        <h6 class="card-title">Gestão de Risco</h6>
+                                        <div class="row">
+                                            <div class="col-md-3">
+                                                <label class="form-label">Risco R$</label>
+                                                <input type="number" step="0.01" class="form-control" id="swing-risk-amount">
+                                            </div>
+                                            <div class="col-md-3">
+                                                <label class="form-label">Risco %</label>
+                                                <input type="number" step="0.01" class="form-control" id="swing-risk-percent">
+                                            </div>
+                                            <div class="col-md-3">
+                                                <label class="form-label">Alvo %</label>
+                                                <input type="number" step="0.01" class="form-control" id="swing-target-percent" readonly>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <label class="form-label">Stop %</label>
+                                                <input type="number" step="0.01" class="form-control" id="swing-stop-percent" readonly>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Analytical Text -->
+                                <div class="mb-3">
+                                    <label class="form-label">Texto Analítico</label>
+                                    <textarea class="form-control" id="swing-analytical-text" rows="4" placeholder="Texto gerado por IA ou editado manualmente"></textarea>
+                                    <div class="d-flex gap-2 mt-2">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="swing-generate-ai-text">
+                                            <i class="fas fa-robot me-1"></i>Gerar com IA
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-info" id="swing-update-pdf-text">
+                                            <i class="fas fa-sync me-1"></i>Atualizar texto do PDF
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Client Name -->
+                                <div class="mb-3">
+                                    <label class="form-label">Cliente Específico (opcional)</label>
+                                    <input type="text" class="form-control" id="swing-client-name" placeholder="Nome do cliente">
+                                </div>
+
+                                <!-- Actions -->
+                                <div class="d-flex gap-2">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-file-pdf me-2"></i>Gerar PDF / Começar Trade
+                                    </button>
+                                    <button type="reset" class="btn btn-outline-secondary">
+                                        <i class="fas fa-times me-2"></i>Limpar
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== DAY TRADE MODE ========== -->
+        <div id="daytrade-container" class="mode-container" style="display: none;">
+            <div class="row justify-content-center">
+                <div class="col-lg-10">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0"><i class="fas fa-bolt me-2"></i>Day Trade</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="daytrade-form">
+                                <!-- Date and Risk -->
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label">Data</label>
+                                        <input type="date" class="form-control" id="daytrade-date">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Risco R$</label>
+                                        <input type="number" step="0.01" class="form-control" id="daytrade-risk-amount">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Risco %</label>
+                                        <input type="number" step="0.01" class="form-control" id="daytrade-risk-percent">
+                                    </div>
+                                </div>
+
+                                <!-- Single Trade Entry Form -->
+                                <div class="card bg-light mb-3">
+                                    <div class="card-body">
+                                        <h6 class="card-title">Adicionar Trade</h6>
+                                        <div class="row">
+                                            <div class="col-md-3 mb-2">
+                                                <label class="form-label">Ativo</label>
+                                                <input type="text" class="form-control form-control-sm" id="dt-entry-symbol">
+                                            </div>
+                                            <div class="col-md-2 mb-2">
+                                                <label class="form-label">Direção</label>
+                                                <select class="form-select form-select-sm" id="dt-entry-direction">
+                                                    <option value="C">C (Compra)</option>
+                                                    <option value="V">V (Venda)</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-md-2 mb-2">
+                                                <label class="form-label">Entrada</label>
+                                                <input type="number" step="0.01" class="form-control form-control-sm" id="dt-entry-price">
+                                            </div>
+                                            <div class="col-md-2 mb-2">
+                                                <label class="form-label">Variação Máx</label>
+                                                <input type="number" step="0.01" class="form-control form-control-sm" id="dt-entry-variation">
+                                            </div>
+                                            <div class="col-md-1 mb-2">
+                                                <label class="form-label">Alvo</label>
+                                                <input type="number" step="0.01" class="form-control form-control-sm" id="dt-entry-target">
+                                            </div>
+                                            <div class="col-md-1 mb-2">
+                                                <label class="form-label">Stop</label>
+                                                <input type="number" step="0.01" class="form-control form-control-sm" id="dt-entry-stop">
+                                            </div>
+                                            <div class="col-md-1 mb-2 d-flex align-items-end">
+                                                <button type="button" class="btn btn-sm btn-success w-100" id="dt-add-entry">
+                                                    <i class="fas fa-plus"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Actions -->
+                                <div class="d-flex gap-2">
+                                    <button type="submit" class="btn btn-success">
+                                        <i class="fas fa-file-pdf me-2"></i>Gerar PDF
+                                    </button>
+                                    <button type="reset" class="btn btn-outline-secondary">
+                                        <i class="fas fa-times me-2"></i>Limpar
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Livro de Trades -->
+                    <div class="card shadow-sm mt-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">Livro de Trades</h6>
+                        </div>
+                        <div class="card-body p-0">
+                            <ul class="nav nav-tabs" id="tradesTab" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="buys-tab" data-bs-toggle="tab" data-bs-target="#buys" type="button" role="tab">
+                                        <i class="fas fa-arrow-up text-success me-1"></i>Compras
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="sells-tab" data-bs-toggle="tab" data-bs-target="#sells" type="button" role="tab">
+                                        <i class="fas fa-arrow-down text-danger me-1"></i>Vendas
+                                    </button>
+                                </li>
+                            </ul>
+                            <div class="tab-content" id="tradesTabContent">
+                                <div class="tab-pane fade show active p-0" id="buys" role="tabpanel">
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-hover mb-0">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Ativo</th>
+                                                    <th>Entrada</th>
+                                                    <th>Risco Zero</th>
+                                                    <th>Risco Zero %</th>
+                                                    <th>Alvo</th>
+                                                    <th>Alvo %</th>
+                                                    <th>Stop</th>
+                                                    <th>Stop %</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="dt-buys-tbody">
+                                                <!-- Filled by JS -->
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="tab-pane fade p-0" id="sells" role="tabpanel">
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-hover mb-0">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Ativo</th>
+                                                    <th>Entrada</th>
+                                                    <th>Risco Zero</th>
+                                                    <th>Risco Zero %</th>
+                                                    <th>Alvo</th>
+                                                    <th>Alvo %</th>
+                                                    <th>Stop</th>
+                                                    <th>Stop %</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="dt-sells-tbody">
+                                                <!-- Filled by JS -->
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== PORTFOLIO MODE ========== -->
+        <div id="portfolio-container" class="mode-container" style="display: none;">
+            <div class="row justify-content-center">
+                <div class="col-lg-10">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="mb-0"><i class="fas fa-briefcase me-2"></i>Carteira</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-secondary">
+                                Esta carteira é <b>automática</b>: ela lista os ativos que você manipulou em <b>Day Trade</b> e <b>Swing Trade</b> no período.
+                            </div>
+
+                            <form id="portfolio-form" autocomplete="off">
+                                <!-- Period + reference date -->
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label">Período</label>
+                                        <select class="form-select" id="portfolio-period">
+                                            <option value="weekly" selected>Semanal</option>
+                                            <option value="monthly">Mensal</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Data base</label>
+                                        <input type="date" class="form-control" id="portfolio-reference-date">
+                                    </div>
+                                    <div class="col-md-4 d-flex align-items-end gap-2">
+                                        <button type="button" class="btn btn-info text-white w-100" id="pf-load-assets">
+                                            <i class="fas fa-sync me-2"></i>Carregar ativos
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Sources -->
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="portfolio-include-daytrade" checked>
+                                            <label class="form-check-label" for="portfolio-include-daytrade">Incluir Day Trade</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="portfolio-include-swing" checked>
+                                            <label class="form-check-label" for="portfolio-include-swing">Incluir Swing Trade</label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="text-muted small mb-2" id="pf-range-label"></div>
+
+                                <!-- Assets Table -->
+                                <div class="table-responsive mb-3">
+                                    <table class="table table-sm table-hover">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Ativo</th>
+                                                <th>Entrada</th>
+                                                <th>Entrada Máx</th>
+                                                <th>Risco Zero</th>
+                                                <th>Alvo</th>
+                                                <th>Stop</th>
+                                                <th>Origem</th>
+                                                <th>Data</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="pf-assets-tbody">
+                                            <!-- Filled by JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <!-- Analytical Text -->
+                                <div class="mb-3">
+                                    <label class="form-label">Texto da Carteira</label>
+                                    <textarea class="form-control" id="portfolio-analytical-text" rows="4" placeholder="Texto analítico livre"></textarea>
+                                </div>
+
+                                <!-- Actions -->
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn btn-info text-white" id="pf-generate-pdf">
+                                        <i class="fas fa-file-pdf me-2"></i>Gerar PDF
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary" id="pf-clear-assets">
+                                        <i class="fas fa-times me-2"></i>Limpar lista
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
