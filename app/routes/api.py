@@ -726,7 +726,7 @@ def register_api_routes(app, services: Services) -> None:
                 stop=float(trade.get("stop") or 0),
                 alvo=float(trade.get("target") or 0),
                 quantidade=int(trade.get("quantity") or 1),
-                timeframe=str(trade.get("timeframe_minor") or "1h"),
+                timeframe=str(trade.get("timeframe_major") or "1d"),
                 entrada_min=float(trade.get("entry_min") or trade.get("entry") or 0),
                 entrada_max=float(trade.get("entry_max") or trade.get("entry") or 0),
                 observacoes=str(trade.get("analytical_text") or ""),
@@ -753,11 +753,21 @@ def register_api_routes(app, services: Services) -> None:
                 }
                 return mapping.get(raw, raw)
 
-            base_tfs = ["15m", "1h", "1d"]
+            # Para swing trade, os timeframes principais são major (principal) e minor (entrada)
+            # A ordem correta é: major -> minor -> outros complementares
+            base_tfs = ["1d", "1h", "15m"]
             major = _normalize_tf(trade.get("timeframe_major"))
             minor = _normalize_tf(trade.get("timeframe_minor"))
+            
             tfs: List[str] = []
-            for tf in [minor, major, *base_tfs]:
+            # Primeiro adiciona o major (timeframe principal)
+            if major and major not in tfs:
+                tfs.append(major)
+            # Depois o minor (timeframe de entrada)
+            if minor and minor not in tfs:
+                tfs.append(minor)
+            # Por fim, os complementares
+            for tf in base_tfs:
                 if tf and tf not in tfs:
                     tfs.append(tf)
 
