@@ -488,7 +488,58 @@ def register_api_routes(app, services: Services) -> None:
     def api_history():
         try:
             operations = database.get_operations(50)
-            return jsonify(operations)
+
+            # Inclui swing trades no histórico (novo fluxo usa swing/day trade e não preenche mais `operations`).
+            swing_trades = database.get_swing_trades(limit=100)
+            swing_ops: List[Dict[str, Any]] = []
+
+            for swing in swing_trades:
+                try:
+                    direction = str(swing.get("direction") or "LONG").upper()
+                    tipo = "COMPRA" if direction == "LONG" else "VENDA"
+
+                    op_model = Operation(
+                        symbol=str(swing.get("symbol") or "").upper(),
+                        tipo=tipo,
+                        entrada=float(swing.get("entry") or 0),
+                        stop=float(swing.get("stop") or 0),
+                        alvo=float(swing.get("target") or 0),
+                        quantidade=int(swing.get("quantity") or 0),
+                        timeframe=str(swing.get("timeframe_major") or "1d"),
+                        entrada_min=swing.get("entry_min"),
+                        entrada_max=swing.get("entry_max"),
+                        observacoes=str(swing.get("analytical_text") or ""),
+                    )
+
+                    op_dict = asdict(op_model)
+                    op_dict.update(
+                        {
+                            "id": f"swing-{swing.get('id')}",
+                            "pdf_path": swing.get("pdf_path"),
+                            "created_at": swing.get("created_at") or swing.get("trade_date"),
+                            "status": swing.get("status") or "ABERTA",
+                            "source": "swing_trade",
+                        }
+                    )
+                    swing_ops.append(op_dict)
+                except Exception as exc:
+                    logger.warning("Falha ao mapear swing trade para histórico: %s", exc, exc_info=True)
+
+            # Marca origem para diferenciar e faz merge.
+            for op in operations:
+                op.setdefault("source", "operation")
+
+            merged = operations + swing_ops
+
+            def _sort_key(item: Dict[str, Any]):
+                ts = pd.to_datetime(item.get("created_at"), errors="coerce")
+                if pd.isna(ts):
+                    return pd.Timestamp.min
+                return ts
+
+            merged.sort(key=_sort_key, reverse=True)
+
+            return jsonify(merged)
         except Exception as exc:
             logger.error(f"Erro ao buscar histórico: {exc}")
             return jsonify([])
@@ -826,14 +877,64 @@ def register_api_routes(app, services: Services) -> None:
 
     @bp.route("/api/day-trade/<int:session_id>/pdf", methods=["GET"])
     def api_day_trade_pdf(session_id):
-        """Generate PDF for a specific day trade session"""
+        """Generate PDF for a specific day trade session with charts per símbolo/timeframe."""
         try:
             session = database.get_day_trade_session(int(session_id))
-            
+
             if not session:
                 return jsonify({"error": "Sessão não encontrada"}), 404
 
-            pdf_path = report_generator.generate_day_trade_pdf(session)
+            entries = session.get("entries") or []
+            symbols = sorted({str(e.get("symbol") or "").upper() for e in entries if e.get("symbol")})
+
+            charts_payload: List[Dict[str, Any]] = []
+            preferred_timeframes = ["15m", "1h", "1d"]
+
+            for symbol in symbols:
+                for tf in preferred_timeframes:
+                    try:
+                        df_raw = finance_data.get_candles(symbol, tf, 150)
+                        df_norm = ChartGenerator.prepare_ohlc_dataframe(df_raw, tf)
+                        df_norm = ChartGenerator._ensure_overlay_columns(df_norm)
+                        title = f"{symbol} • {format_timeframe_label(tf)}"
+                        image_b64 = chart_generator.generate_chart_image(df_norm, title, timeframe=tf)
+
+                        source_raw = df_norm.attrs.get("source", df_raw.attrs.get("source", "unknown"))
+                        source = source_raw
+                        if isinstance(source_raw, str) and source_raw.lower().startswith("fallback"):
+                            source = "fallback"
+
+                        last_time = None
+                        last_close = None
+                        if not df_norm.empty:
+                            try:
+                                last_time = pd.Timestamp(df_norm.index[-1]).strftime("%d/%m/%Y %H:%M")
+                            except Exception:
+                                last_time = str(df_norm.index[-1])
+                            try:
+                                last_close = float(df_norm["close"].iloc[-1]) if "close" in df_norm.columns else None
+                            except Exception:
+                                last_close = None
+
+                        charts_payload.append(
+                            {
+                                "symbol": symbol,
+                                "timeframe": tf,
+                                "image": image_b64,
+                                "source": source,
+                                "last_time": last_time,
+                                "last_close": last_close,
+                            }
+                        )
+                    except Exception as exc_inner:
+                        logger.warning(
+                            "Falha ao gerar chart para day trade %s %s: %s",
+                            symbol,
+                            tf,
+                            exc_inner,
+                        )
+
+            pdf_path = report_generator.generate_day_trade_pdf(session, charts_payload)
             database.update_day_trade_session_pdf(int(session_id), pdf_path)
 
             return jsonify(
@@ -843,7 +944,7 @@ def register_api_routes(app, services: Services) -> None:
                     "url": f"/reports/{os.path.basename(pdf_path)}",
                 }
             )
-            
+
         except Exception as exc:
             logger.error(f"Erro ao gerar PDF de day trade: {exc}")
             return jsonify({"error": str(exc)}), 500

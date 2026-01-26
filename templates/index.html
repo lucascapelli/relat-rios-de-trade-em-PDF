@@ -527,9 +527,9 @@
                         <i class="fas fa-sync-alt"></i>
                     </button>
                 </div>
-                <div class="card-body p-0">
+                <div class="card-body p-0 d-none d-md-block">
                     <div class="table-responsive">
-                        <table class="table table-hover mb-0">
+                        <table class="table table-hover mb-0 history-table">
                             <thead class="table-light">
                                 <tr>
                                     <th>ID</th>
@@ -550,6 +550,13 @@
                                 <!-- History will be loaded here -->
                             </tbody>
                         </table>
+                    </div>
+                </div>
+
+                <!-- Mobile-friendly cards -->
+                <div class="card-body d-block d-md-none bg-light">
+                    <div id="history-cards" class="d-flex flex-column gap-2">
+                        <!-- Mobile cards injected via JS -->
                     </div>
                 </div>
             </div>

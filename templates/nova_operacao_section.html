@@ -214,58 +214,69 @@
                             <h5 class="mb-0"><i class="fas fa-bolt me-2"></i>Day Trade</h5>
                         </div>
                         <div class="card-body">
+                            <div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-2">
+                                <div>
+                                    <div class="text-muted small">Fluxo rápido</div>
+                                    <div class="fw-semibold">1) Configure a sessão · 2) Adicione trades · 3) Gere o PDF</div>
+                                </div>
+                                <span class="badge bg-light text-dark" id="dt-total-count">0 trades na lista</span>
+                            </div>
+
                             <form id="daytrade-form">
                                 <!-- Date and Risk -->
-                                <div class="row mb-3">
+                                <div class="row g-3 mb-3">
                                     <div class="col-md-4">
-                                        <label class="form-label">Data</label>
+                                        <label class="form-label">Data da sessão</label>
                                         <input type="date" class="form-control" id="daytrade-date">
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">Risco R$</label>
-                                        <input type="number" step="0.01" class="form-control" id="daytrade-risk-amount">
+                                        <input type="number" step="0.01" class="form-control" id="daytrade-risk-amount" placeholder="Opcional">
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">Risco %</label>
-                                        <input type="number" step="0.01" class="form-control" id="daytrade-risk-percent">
+                                        <input type="number" step="0.01" class="form-control" id="daytrade-risk-percent" placeholder="Opcional">
                                     </div>
                                 </div>
 
                                 <!-- Single Trade Entry Form -->
-                                <div class="card bg-light mb-3">
+                                <div class="card bg-light border-0 mb-3">
                                     <div class="card-body">
-                                        <h6 class="card-title">Adicionar Trade</h6>
-                                        <div class="row">
-                                            <div class="col-md-3 mb-2">
+                                        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                                            <h6 class="card-title mb-0">Passo 2: adicionar trade</h6>
+                                            <span class="text-muted small">Ele aparece logo abaixo na lista</span>
+                                        </div>
+                                        <div class="row g-2">
+                                            <div class="col-md-3 col-12">
                                                 <label class="form-label">Ativo</label>
-                                                <input type="text" class="form-control form-control-sm" id="dt-entry-symbol">
+                                                <input type="text" class="form-control form-control-sm" id="dt-entry-symbol" placeholder="Ex: WINFUT">
                                             </div>
-                                            <div class="col-md-2 mb-2">
+                                            <div class="col-md-2 col-6">
                                                 <label class="form-label">Direção</label>
                                                 <select class="form-select form-select-sm" id="dt-entry-direction">
                                                     <option value="C">C (Compra)</option>
                                                     <option value="V">V (Venda)</option>
                                                 </select>
                                             </div>
-                                            <div class="col-md-2 mb-2">
+                                            <div class="col-md-2 col-6">
                                                 <label class="form-label">Entrada</label>
                                                 <input type="number" step="0.01" class="form-control form-control-sm" id="dt-entry-price">
                                             </div>
-                                            <div class="col-md-2 mb-2">
+                                            <div class="col-md-2 col-6">
                                                 <label class="form-label">Variação Máx</label>
-                                                <input type="number" step="0.01" class="form-control form-control-sm" id="dt-entry-variation">
+                                                <input type="number" step="0.01" class="form-control form-control-sm" id="dt-entry-variation" placeholder="Opcional">
                                             </div>
-                                            <div class="col-md-1 mb-2">
+                                            <div class="col-md-1 col-6">
                                                 <label class="form-label">Alvo</label>
                                                 <input type="number" step="0.01" class="form-control form-control-sm" id="dt-entry-target">
                                             </div>
-                                            <div class="col-md-1 mb-2">
+                                            <div class="col-md-1 col-6">
                                                 <label class="form-label">Stop</label>
                                                 <input type="number" step="0.01" class="form-control form-control-sm" id="dt-entry-stop">
                                             </div>
-                                            <div class="col-md-1 mb-2 d-flex align-items-end">
-                                                <button type="button" class="btn btn-sm btn-success w-100" id="dt-add-entry">
-                                                    <i class="fas fa-plus"></i>
+                                            <div class="col-md-1 col-12 d-flex align-items-end">
+                                                <button type="button" class="btn btn-success w-100" id="dt-add-entry">
+                                                    <i class="fas fa-plus me-2"></i>Adicionar
                                                 </button>
                                             </div>
                                         </div>
@@ -273,82 +284,92 @@
                                 </div>
 
                                 <!-- Actions -->
-                                <div class="d-flex gap-2">
-                                    <button type="submit" class="btn btn-success">
-                                        <i class="fas fa-file-pdf me-2"></i>Gerar PDF
+                                <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                                    <button type="submit" class="btn btn-success" id="daytrade-generate-pdf">
+                                        <i class="fas fa-file-pdf me-2"></i>Gerar PDF da sessão
                                     </button>
                                     <button type="reset" class="btn btn-outline-secondary">
                                         <i class="fas fa-times me-2"></i>Limpar
                                     </button>
+                                    <span class="text-muted small">Dica: adicione quantos trades quiser antes de gerar o PDF.</span>
+                                </div>
+
+                                <!-- Trade list inline -->
+                                <div class="pt-3 mt-3 border-top">
+                                    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+                                        <div>
+                                            <h6 class="mb-0">Trades adicionados</h6>
+                                            <div class="text-muted small">Eles ficam aqui até gerar o PDF.</div>
+                                        </div>
+                                        <span class="badge bg-light text-dark" id="dt-list-summary">0 compras • 0 vendas</span>
+                                    </div>
+
+                                    <div class="alert alert-secondary mb-0" id="dt-empty-state">
+                                        Nenhum trade adicionado ainda. Preencha os campos acima e clique em "Adicionar".
+                                    </div>
+
+                                    <div id="dt-table-wrapper" style="display: none;" class="mt-2">
+                                        <ul class="nav nav-tabs" id="tradesTab" role="tablist">
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link active" id="buys-tab" data-bs-toggle="tab" data-bs-target="#buys" type="button" role="tab">
+                                                    <i class="fas fa-arrow-up text-success me-1"></i>Compras
+                                                </button>
+                                            </li>
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link" id="sells-tab" data-bs-toggle="tab" data-bs-target="#sells" type="button" role="tab">
+                                                    <i class="fas fa-arrow-down text-danger me-1"></i>Vendas
+                                                </button>
+                                            </li>
+                                        </ul>
+                                        <div class="tab-content" id="tradesTabContent">
+                                            <div class="tab-pane fade show active p-0" id="buys" role="tabpanel">
+                                                <div class="table-responsive">
+                                                    <table class="table table-sm table-hover mb-0">
+                                                        <thead class="table-light">
+                                                            <tr>
+                                                                <th>Ativo</th>
+                                                                <th>Entrada</th>
+                                                                <th>Risco Zero</th>
+                                                                <th>Risco Zero %</th>
+                                                                <th>Alvo</th>
+                                                                <th>Alvo %</th>
+                                                                <th>Stop</th>
+                                                                <th>Stop %</th>
+                                                                <th></th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="dt-buys-tbody">
+                                                            <!-- Filled by JS -->
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <div class="tab-pane fade p-0" id="sells" role="tabpanel">
+                                                <div class="table-responsive">
+                                                    <table class="table table-sm table-hover mb-0">
+                                                        <thead class="table-light">
+                                                            <tr>
+                                                                <th>Ativo</th>
+                                                                <th>Entrada</th>
+                                                                <th>Risco Zero</th>
+                                                                <th>Risco Zero %</th>
+                                                                <th>Alvo</th>
+                                                                <th>Alvo %</th>
+                                                                <th>Stop</th>
+                                                                <th>Stop %</th>
+                                                                <th></th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="dt-sells-tbody">
+                                                            <!-- Filled by JS -->
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </form>
-                        </div>
-                    </div>
-
-                    <!-- Livro de Trades -->
-                    <div class="card shadow-sm mt-3">
-                        <div class="card-header">
-                            <h6 class="mb-0">Livro de Trades</h6>
-                        </div>
-                        <div class="card-body p-0">
-                            <ul class="nav nav-tabs" id="tradesTab" role="tablist">
-                                <li class="nav-item" role="presentation">
-                                    <button class="nav-link active" id="buys-tab" data-bs-toggle="tab" data-bs-target="#buys" type="button" role="tab">
-                                        <i class="fas fa-arrow-up text-success me-1"></i>Compras
-                                    </button>
-                                </li>
-                                <li class="nav-item" role="presentation">
-                                    <button class="nav-link" id="sells-tab" data-bs-toggle="tab" data-bs-target="#sells" type="button" role="tab">
-                                        <i class="fas fa-arrow-down text-danger me-1"></i>Vendas
-                                    </button>
-                                </li>
-                            </ul>
-                            <div class="tab-content" id="tradesTabContent">
-                                <div class="tab-pane fade show active p-0" id="buys" role="tabpanel">
-                                    <div class="table-responsive">
-                                        <table class="table table-sm table-hover mb-0">
-                                            <thead class="table-light">
-                                                <tr>
-                                                    <th>Ativo</th>
-                                                    <th>Entrada</th>
-                                                    <th>Risco Zero</th>
-                                                    <th>Risco Zero %</th>
-                                                    <th>Alvo</th>
-                                                    <th>Alvo %</th>
-                                                    <th>Stop</th>
-                                                    <th>Stop %</th>
-                                                    <th></th>
-                                                </tr>
-                                            </thead>
-                                            <tbody id="dt-buys-tbody">
-                                                <!-- Filled by JS -->
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                                <div class="tab-pane fade p-0" id="sells" role="tabpanel">
-                                    <div class="table-responsive">
-                                        <table class="table table-sm table-hover mb-0">
-                                            <thead class="table-light">
-                                                <tr>
-                                                    <th>Ativo</th>
-                                                    <th>Entrada</th>
-                                                    <th>Risco Zero</th>
-                                                    <th>Risco Zero %</th>
-                                                    <th>Alvo</th>
-                                                    <th>Alvo %</th>
-                                                    <th>Stop</th>
-                                                    <th>Stop %</th>
-                                                    <th></th>
-                                                </tr>
-                                            </thead>
-                                            <tbody id="dt-sells-tbody">
-                                                <!-- Filled by JS -->
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -386,6 +407,36 @@
                                         <button type="button" class="btn btn-info text-white w-100" id="pf-load-assets">
                                             <i class="fas fa-sync me-2"></i>Carregar ativos
                                         </button>
+                                    </div>
+                                </div>
+
+                                <!-- Saved portfolios -->
+                                <div class="card bg-light mb-3">
+                                    <div class="card-body">
+                                        <div class="row g-2 align-items-end">
+                                            <div class="col-md-6">
+                                                <label class="form-label mb-1">Carteira salva</label>
+                                                <select class="form-select" id="pf-saved-select">
+                                                    <option value="">Selecione uma carteira salva</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-md-2 d-grid">
+                                                <button type="button" class="btn btn-outline-secondary" id="pf-refresh-saved">
+                                                    <i class="fas fa-rotate"></i>
+                                                </button>
+                                            </div>
+                                            <div class="col-md-2 d-grid">
+                                                <button type="button" class="btn btn-outline-primary" id="pf-load-saved">
+                                                    <i class="fas fa-folder-open me-1"></i>Carregar
+                                                </button>
+                                            </div>
+                                            <div class="col-md-2 d-grid">
+                                                <button type="button" class="btn btn-outline-dark" id="pf-pdf-saved">
+                                                    <i class="fas fa-file-pdf me-1"></i>PDF
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="text-muted small mt-2" id="pf-saved-meta"></div>
                                     </div>
                                 </div>
 

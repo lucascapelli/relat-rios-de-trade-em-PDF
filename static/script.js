@@ -819,6 +819,13 @@ class TradingApp {
     isValidNumber(value) {
         return value !== null && value !== undefined && !Number.isNaN(value);
     }
+
+    buildPdfUrl(path) {
+        if (!path) return null;
+        const filename = String(path).split(/[\\\/]/).pop();
+        if (!filename) return null;
+        return `/reports/${filename}`;
+    }
     
     updateCurrentPrice(candle) {
         document.getElementById('current-price').textContent = 
@@ -846,11 +853,18 @@ class TradingApp {
     renderOperationsTable() {
         const tbody = document.getElementById('history-table-body');
         tbody.innerHTML = '';
+
+        const cardsContainer = document.getElementById('history-cards');
+        if (cardsContainer) {
+            cardsContainer.innerHTML = '';
+        }
         
         this.operations.forEach(op => {
             const row = document.createElement('tr');
             const statusClass = (op.status || '').toLowerCase().replace(/\s+/g, '-');
             row.className = `operation-card ${statusClass}`;
+
+            const pdfUrl = this.buildPdfUrl(op.pdf_url || op.pdf_path);
 
             const symbol = op.symbol || '-';
             const faixa = (op.entrada_min !== null && op.entrada_min !== undefined &&
@@ -865,7 +879,7 @@ class TradingApp {
             const alvoInfo = `${this.formatCurrency(op.alvo)} | ${this.formatTicks(op.pontos_alvo)}`;
             const stopInfo = `${this.formatCurrency(op.stop)} | ${this.formatTicks(op.pontos_stop)}`;
             const createdAt = op.created_at ? new Date(op.created_at).toLocaleDateString('pt-BR') : '-';
-            const pdfIcon = op.pdf_path ? '<i class="fas fa-file-pdf ms-1 text-danger" title="Possui PDF"></i>' : '';
+            const pdfIcon = pdfUrl ? '<i class="fas fa-file-pdf ms-1 text-danger" title="Possui PDF"></i>' : '';
 
             row.innerHTML = `
                 <td>${op.id}</td>
@@ -894,14 +908,80 @@ class TradingApp {
                     <button class="btn btn-sm btn-outline-primary view-operation" data-id="${op.id}">
                         <i class="fas fa-eye"></i>
                     </button>
-                    ${op.pdf_path ? `
-                    <a href="/reports/${op.pdf_path.split('/').pop()}" class="btn btn-sm btn-outline-danger" target="_blank">
+                    ${pdfUrl ? `
+                    <a href="${pdfUrl}" class="btn btn-sm btn-outline-danger" target="_blank">
                         <i class="fas fa-file-pdf"></i>
                     </a>
                     ` : ''}
                 </td>
             `;
             tbody.appendChild(row);
+
+            if (cardsContainer) {
+                const card = document.createElement('div');
+                card.className = 'card shadow-sm';
+
+                const directionBadge = (op.tipo || '').toUpperCase() === 'COMPRA'
+                    ? '<span class="badge bg-success">COMPRA</span>'
+                    : '<span class="badge bg-danger">VENDA</span>';
+                const statusBadge = `<span class="badge ${this.getStatusBadgeClass(op.status)}">${op.status || 'ABERTA'}</span>`;
+                const createdAt = op.created_at ? new Date(op.created_at).toLocaleDateString('pt-BR') : '-';
+
+                card.innerHTML = `
+                    <div class="card-body p-3">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <div class="fw-semibold">${symbol} ${pdfIcon}</div>
+                                <div class="text-muted small">ID ${op.id} • ${createdAt}</div>
+                            </div>
+                            <div class="d-flex flex-column align-items-end gap-1">
+                                ${directionBadge}
+                                ${statusBadge}
+                            </div>
+                        </div>
+
+                        <div class="row g-2 small">
+                            <div class="col-6">
+                                <div class="text-muted">Entrada</div>
+                                <div class="fw-semibold">${this.formatCurrency(op.entrada)}</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="text-muted">Faixa</div>
+                                <div class="fw-semibold">${faixa}</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="text-muted">Alvo</div>
+                                <div class="fw-semibold">${alvoInfo}</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="text-muted">Stop</div>
+                                <div class="fw-semibold">${stopInfo}</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="text-muted">Parcial</div>
+                                <div class="fw-semibold">${parcialInfo}</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="text-muted">Qtd</div>
+                                <div class="fw-semibold">${op.quantidade || 0}</div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-end gap-2 mt-3">
+                            <button class="btn btn-sm btn-outline-primary view-operation" data-id="${op.id}">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            ${pdfUrl ? `
+                            <a href="${pdfUrl}" class="btn btn-sm btn-outline-danger" target="_blank">
+                                <i class="fas fa-file-pdf"></i>
+                            </a>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+
+                cardsContainer.appendChild(card);
+            }
         });
         
         // Add event listeners to view buttons
@@ -911,6 +991,12 @@ class TradingApp {
                 this.showOperationDetails(opId);
             });
         });
+
+        if (cardsContainer && this.operations.length === 0) {
+            cardsContainer.innerHTML = `
+                <div class="alert alert-secondary mb-0">Nenhuma operação encontrada. Toque em "Atualizar" para recarregar.</div>
+            `;
+        }
     }
     
     async loadRecentOperations() {

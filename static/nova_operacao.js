@@ -5,6 +5,8 @@ class NovaOperacaoManager {
         this.currentMode = 'swing';
         this.dayTradeEntries = { C: [], V: [] }; // Compras e Vendas
         this.portfolioAssets = [];
+        this.savedPortfolios = [];
+        this.selectedPortfolioId = null;
         this.init();
     }
 
@@ -65,6 +67,10 @@ class NovaOperacaoManager {
             console.log('Container shown:', containers[mode]);
         } else {
             console.error('Container not found:', containers[mode]);
+        }
+
+        if (mode === 'portfolio') {
+            this.fetchSavedPortfolios();
         }
     }
 
@@ -184,6 +190,14 @@ class NovaOperacaoManager {
             e.preventDefault();
             await this.submitDayTrade();
         });
+
+        form.addEventListener('reset', () => {
+            this.dayTradeEntries = { C: [], V: [] };
+            this.renderDayTradeEntries();
+            this.setDefaultDates();
+        });
+
+        this.updateDayTradeSummary();
     }
 
     addDayTradeEntry() {
@@ -266,6 +280,36 @@ class NovaOperacaoManager {
                     </td>
                 </tr>
             `).join('');
+        }
+
+        this.updateDayTradeSummary();
+    }
+
+    updateDayTradeSummary() {
+        const buys = this.dayTradeEntries.C.length;
+        const sells = this.dayTradeEntries.V.length;
+        const total = buys + sells;
+
+        const totalBadge = document.getElementById('dt-total-count');
+        if (totalBadge) {
+            totalBadge.textContent = `${total} trade${total === 1 ? '' : 's'} na lista`;
+        }
+
+        const summary = document.getElementById('dt-list-summary');
+        if (summary) {
+            const buysLabel = buys === 1 ? 'compra' : 'compras';
+            const sellsLabel = sells === 1 ? 'venda' : 'vendas';
+            summary.textContent = `${buys} ${buysLabel} • ${sells} ${sellsLabel}`;
+        }
+
+        const emptyState = document.getElementById('dt-empty-state');
+        const tableWrapper = document.getElementById('dt-table-wrapper');
+        if (emptyState) emptyState.style.display = total === 0 ? 'block' : 'none';
+        if (tableWrapper) tableWrapper.style.display = total === 0 ? 'none' : 'block';
+
+        const pdfBtn = document.getElementById('daytrade-generate-pdf');
+        if (pdfBtn) {
+            pdfBtn.disabled = total === 0;
         }
     }
 
@@ -351,6 +395,20 @@ class NovaOperacaoManager {
         document.getElementById('pf-clear-assets')?.addEventListener('click', () => {
             this.clearManipulatedAssets();
         });
+
+        document.getElementById('pf-refresh-saved')?.addEventListener('click', async () => {
+            await this.fetchSavedPortfolios(true);
+        });
+
+        document.getElementById('pf-load-saved')?.addEventListener('click', () => {
+            this.loadSavedPortfolioFromSelect();
+        });
+
+        document.getElementById('pf-pdf-saved')?.addEventListener('click', async () => {
+            await this.generateSavedPortfolioPdf();
+        });
+
+        this.fetchSavedPortfolios();
     }
 
     getPortfolioFilters() {
@@ -394,6 +452,121 @@ class NovaOperacaoManager {
         } catch (error) {
             console.error('Erro ao carregar ativos manipulados:', error);
             this.showToast(`Erro ao carregar ativos: ${error.message}`, 'danger');
+        }
+    }
+
+    async fetchSavedPortfolios(showToast = false) {
+        try {
+            const response = await fetch('/api/portfolio/list');
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result?.error || 'Erro ao carregar carteiras salvas');
+            }
+
+            this.savedPortfolios = Array.isArray(result) ? result : [];
+            this.renderSavedPortfolioOptions();
+
+            if (showToast) {
+                this.showToast('Carteiras atualizadas', 'success');
+            }
+        } catch (error) {
+            console.error('Erro ao listar carteiras:', error);
+            this.showToast(`Erro ao listar carteiras: ${error.message}`, 'danger');
+        }
+    }
+
+    renderSavedPortfolioOptions() {
+        const select = document.getElementById('pf-saved-select');
+        if (!select) return;
+
+        const options = ['<option value="">Selecione uma carteira salva</option>'];
+        this.savedPortfolios.forEach((p) => {
+            const labelParts = [
+                `#${p.id}`,
+                p.portfolio_type || 'GERAL',
+                p.start_date && p.end_date ? `${p.start_date} -> ${p.end_date}` : (p.created_at || ''),
+                p.version ? `v${p.version}` : null,
+            ].filter(Boolean);
+            options.push(`<option value="${p.id}">${labelParts.join(' • ')}</option>`);
+        });
+
+        select.innerHTML = options.join('');
+        if (!this.savedPortfolios.find(p => p.id === this.selectedPortfolioId)) {
+            this.selectedPortfolioId = null;
+        }
+        if (this.selectedPortfolioId) {
+            select.value = String(this.selectedPortfolioId);
+        }
+    }
+
+    loadSavedPortfolioFromSelect() {
+        const select = document.getElementById('pf-saved-select');
+        if (!select) return;
+        const id = parseInt(select.value, 10);
+        if (!id) {
+            this.showToast('Escolha uma carteira salva para carregar', 'warning');
+            return;
+        }
+
+        const portfolio = this.savedPortfolios.find((p) => p.id === id);
+        if (!portfolio) {
+            this.showToast('Carteira não encontrada na lista', 'danger');
+            return;
+        }
+
+        this.applySavedPortfolio(portfolio);
+    }
+
+    applySavedPortfolio(portfolio) {
+        this.selectedPortfolioId = portfolio.id;
+        this.portfolioAssets = Array.isArray(portfolio.assets) ? portfolio.assets : [];
+        this.renderPortfolioAssets();
+
+        const rangeLabel = document.getElementById('pf-range-label');
+        if (rangeLabel) {
+            const start = portfolio.start_date || '-';
+            const end = portfolio.end_date || '-';
+            const count = this.portfolioAssets.length;
+            const version = portfolio.version ? ` • v${portfolio.version}` : '';
+            rangeLabel.textContent = `Carteira salva: ${start} até ${end} • Itens: ${count}${version}`;
+        }
+
+        const textarea = document.getElementById('portfolio-analytical-text');
+        if (textarea) {
+            textarea.value = portfolio.analytical_text || '';
+        }
+
+        const meta = document.getElementById('pf-saved-meta');
+        if (meta) {
+            meta.textContent = `${portfolio.portfolio_type || 'GERAL'} • Estado: ${portfolio.state || '-'} • Criada em ${portfolio.created_at || '-'}`;
+        }
+
+        this.showToast('Carteira salva carregada', 'success');
+    }
+
+    async generateSavedPortfolioPdf() {
+        if (!this.selectedPortfolioId) {
+            this.showToast('Selecione e carregue uma carteira salva antes de gerar PDF', 'warning');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/portfolio/${this.selectedPortfolioId}/pdf`);
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result?.error || 'Erro ao gerar PDF da carteira salva');
+            }
+
+            if (result.url) {
+                window.open(result.url, '_blank');
+            }
+
+            this.showToast('PDF da carteira salva gerado', 'success');
+        } catch (error) {
+            console.error('Erro ao gerar PDF salvo:', error);
+            this.showToast(`Erro ao gerar PDF: ${error.message}`, 'danger');
         }
     }
 

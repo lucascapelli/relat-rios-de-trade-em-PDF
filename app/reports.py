@@ -111,8 +111,8 @@ class ReportGenerator:
 
         return output_path
 
-    def generate_day_trade_pdf(self, session: Dict[str, Any]) -> str:
-        """Gera PDF para uma sessão de day trade (tabela de entradas)."""
+    def generate_day_trade_pdf(self, session: Dict[str, Any], charts: Optional[List[ChartPayload]] = None) -> str:
+        """Gera PDF para uma sessão de day trade (tabela de entradas + gráficos)."""
         trade_date = str(session.get("trade_date") or "")
         timestamp = datetime.now(BR_TZ)
         safe_date = trade_date.replace("/", "-") if trade_date else timestamp.strftime("%Y-%m-%d")
@@ -230,6 +230,80 @@ class ReportGenerator:
             )
         )
         story.append(table)
+
+        decoded_charts = self._decode_charts(charts or [])
+        valid_charts = [chart for chart in decoded_charts if chart.get("buffer")]
+
+        if valid_charts:
+            story.append(Spacer(1, 6 * mm))
+            story.append(Paragraph("Gráficos", styles["SectionHeading"]))
+            story.append(Spacer(1, 2 * mm))
+
+            timeframe_labels = {
+                "1m": "1 Minuto",
+                "5m": "5 Minutos",
+                "6m": "6 Minutos",
+                "15m": "15 Minutos",
+                "30m": "30 Minutos",
+                "45m": "45 Minutos",
+                "1h": "60 Minutos",
+                "4h": "4 Horas",
+                "1d": "Diário",
+                "1w": "Semanal",
+            }
+
+            def _fmt_source(value: str) -> str:
+                raw = (value or "").strip().lower()
+                if not raw or raw == "desconhecido":
+                    return "desconhecido"
+                if raw.startswith("fallback"):
+                    return "fallback"
+                return raw
+
+            for idx, chart in enumerate(valid_charts):
+                buffer = chart.get("buffer")
+                timeframe = str(chart.get("timeframe", "")).strip().lower()
+                symbol = str(chart.get("symbol", "")).upper()
+                source = str(chart.get("source", "desconhecido"))
+                last_time = chart.get("last_time")
+                last_close = chart.get("last_close")
+
+                try:
+                    buffer.seek(0)
+                    reader = ImageReader(buffer)
+                    width_px, height_px = reader.getSize()
+                    width_mm = 160 * mm
+                    aspect = height_px / float(width_px) if width_px else 0
+                    height_mm = width_mm * aspect if aspect else 90 * mm
+                    buffer.seek(0)
+                    img = Image(buffer, width=width_mm, height=height_mm)
+                    img.hAlign = "CENTER"
+                except Exception:
+                    self._log.warning("Falha ao preparar imagem do timeframe %s", timeframe, exc_info=True)
+                    continue
+
+                label_tf = timeframe_labels.get(timeframe, timeframe.upper())
+                header_line = f"{symbol} - {label_tf}" if symbol else label_tf
+                update_line = ""
+                if last_time:
+                    update_line = f"Atualizado: {last_time}"
+                elif last_close is not None:
+                    update_line = f"Ultimo preco: {_fmt_price(float(last_close))}"
+
+                chart_block: List[Any] = [
+                    Paragraph(header_line, styles["InfoText"]),
+                    Spacer(1, 2 * mm),
+                    img,
+                    Spacer(1, 1 * mm),
+                    Paragraph(f"Fonte: {_fmt_source(source)}", styles["InfoText"]),
+                ]
+
+                if update_line:
+                    chart_block.append(Paragraph(update_line, styles["InfoText"]))
+
+                story.append(KeepTogether(chart_block))
+                if idx < len(valid_charts) - 1:
+                    story.append(Spacer(1, 6 * mm))
 
         doc = SimpleDocTemplate(
             output_path,
@@ -388,11 +462,12 @@ class ReportGenerator:
                     "source": str(chart.get("source", "desconhecido")),
                     "last_time": chart.get("last_time"),
                     "last_close": chart.get("last_close"),
+                    "symbol": str(chart.get("symbol", "") or "").upper(),
                 }
             )
 
         order = {"15m": 0, "1h": 1, "1d": 2, "6m": 10, "30m": 11, "45m": 12, "4h": 13, "1w": 14}
-        decoded.sort(key=lambda item: (order.get(str(item.get("timeframe", "")), 99), str(item.get("timeframe", ""))))
+        decoded.sort(key=lambda item: (order.get(str(item.get("timeframe", "")), 99), str(item.get("timeframe", "")), item.get("symbol", "")))
         return decoded
 
     def _build_story(
