@@ -139,31 +139,8 @@ def register_api_routes(app, services: Services) -> None:
     @bp.route("/")
     @login_required
     def index():
-        symbols = ["PETR4", "VALE3", "ITUB4", "BBDC4"]
-        stocks: List[Dict[str, Any]] = []
-
-        for sym in symbols:
-            try:
-                info = finance_data.get_ticker_info(sym)
-                if info:
-                    stocks.append(asdict(info))
-            except Exception as exc:
-                logger.error(f"Erro ao buscar {sym}: {exc}")
-
-        try:
-            df = finance_data.get_candles("PETR4", "15m", 50)
-            fig = chart_generator.create_plotly_chart(df, f"PETR4 • {format_timeframe_label('15m')}", timeframe="15m")
-            graph_json = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
-        except Exception as exc:
-            logger.error(f"Erro no gráfico inicial: {exc}")
-            graph_json = "{}"
-
-        return render_template(
-            "index.html",
-            stocks=stocks[:4],
-            graphJSON=graph_json,
-            timeframe="15m",
-        )
+        # Só renderiza a tela inicial, sem buscar dados pesados
+        return render_template("index.html")
 
     @bp.route("/api/quote/<symbol>")
     def api_quote(symbol: str):
