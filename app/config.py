@@ -6,6 +6,10 @@ import importlib.util
 import os
 from pathlib import Path
 import pytz
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if present
+load_dotenv()
 
 # Base directories
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -56,6 +60,7 @@ CHART_CACHE_EXPIRY = 15
 
 # Flask settings
 DEFAULT_SECRET_KEY = "sua-chave-secreta-aqui"
+SECRET_KEY = os.getenv("SECRET_KEY", "default_secret_key")
 
 # Institution / branding (can be overridden by project-root config.py)
 DEFAULT_INSTITUTION_NAME = "Relatórios Trade"
@@ -89,7 +94,26 @@ INSTITUTION_NAME = str(_external_institution.get("INSTITUTION_NAME") or DEFAULT_
 LOGO_PATH = str(_external_institution.get("LOGO_PATH") or DEFAULT_LOGO_PATH)
 INSTITUTION_TEXT = str(_external_institution.get("INSTITUTION_TEXT") or DEFAULT_INSTITUTION_TEXT)
 
+# --- AWS / S3 Compatible Storage Config ---
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+AWS_BUCKET_NAME = os.getenv("AWS_BUCKET_NAME", "")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+AWS_ENDPOINT_URL = os.getenv("AWS_ENDPOINT_URL", "")
+# ------------------------------------------
+
+# Username and password for simple authentication
+USERNAME = os.getenv("APP_USERNAME", "admin")
+PASSWORD = os.getenv("APP_PASSWORD", "123456")
+
 __all__ = [
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_BUCKET_NAME",
+    "AWS_REGION",
+    "AWS_ENDPOINT_URL",
+    "USERNAME",
+    "PASSWORD",
     "PACKAGE_ROOT",
     "PROJECT_ROOT",
     "REPORTS_DIR",
@@ -104,6 +128,7 @@ __all__ = [
     "PRICE_CACHE_EXPIRY",
     "CHART_CACHE_EXPIRY",
     "DEFAULT_SECRET_KEY",
+    "SECRET_KEY",
     "INSTITUTION_NAME",
     "LOGO_PATH",
     "INSTITUTION_TEXT",

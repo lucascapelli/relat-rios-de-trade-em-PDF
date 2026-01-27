@@ -61,3 +61,4 @@ build/
 .github/copilot-instructions.md
 
 /EXEMPLO CLIENTE
+.env

@@ -8,14 +8,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import plotly
-from flask import Blueprint, jsonify, render_template, request, send_from_directory
-
+from flask import Blueprint, jsonify, render_template, request, send_from_directory, redirect
 from ..charts import ChartGenerator, format_timeframe_label
 from ..config import PLACEHOLDER_IMAGE_DATA_URL, REPORTS_DIR
 from ..indicators import TechnicalNarrative
 from ..models import Operation, asdict
 from ..services import Services
 from ..utils import logger
+from app.auth import login_required
 
 
 def _build_chart_components(df: pd.DataFrame, limit: int = 100) -> Tuple[List[Dict[str, Any]], Dict[str, List[Any]]]:
@@ -137,6 +137,7 @@ def register_api_routes(app, services: Services) -> None:
         return "range", ref, ref
 
     @bp.route("/")
+    @login_required
     def index():
         symbols = ["PETR4", "VALE3", "ITUB4", "BBDC4"]
         stocks: List[Dict[str, Any]] = []
@@ -256,14 +257,10 @@ def register_api_routes(app, services: Services) -> None:
                     "60m": "1h",
                     "60min": "1h",
                     "1hour": "1h",
-                    "1d": "1d",
                     "daily": "1d",
                     "diario": "1d",
-                    "1w": "1w",
                     "weekly": "1w",
                     "semanal": "1w",
-                    "15": "15m",
-                    "15min": "15m",
                 }
                 return mapping.get(raw, raw)
 
@@ -545,11 +542,23 @@ def register_api_routes(app, services: Services) -> None:
             return jsonify([])
 
     @bp.route("/reports/<path:filename>")
+    @login_required
     def serve_report(filename: str):
-        return send_from_directory(str(REPORTS_DIR), filename)
+        # Tenta servir localmente primeiro (para dev local)
+        try:
+            return send_from_directory(str(REPORTS_DIR), filename)
+        except Exception:
+            # Se não encontrar local, tenta gerar link do S3/B2
+            from ..storage import get_presigned_url
+            s3_url = get_presigned_url(filename)
+            if s3_url:
+                return redirect(s3_url)
+            # Se falhar tudo, 404
+            return jsonify({"error": "Report not found"}), 404
 
     # ========== SWING TRADE ROUTES ==========
     @bp.route("/api/swing-trade", methods=["POST"])
+    @login_required
     def api_swing_trade():
         try:
             data = request.get_json() or {}
@@ -596,6 +605,7 @@ def register_api_routes(app, services: Services) -> None:
 
     # ========== DAY TRADE ROUTES ==========
     @bp.route("/api/day-trade", methods=["POST"])
+    @login_required
     def api_day_trade():
         try:
             data = request.get_json() or {}
@@ -629,6 +639,7 @@ def register_api_routes(app, services: Services) -> None:
 
     # ========== PORTFOLIO ROUTES ==========
     @bp.route("/api/portfolio", methods=["POST"])
+    @login_required
     def api_portfolio():
         try:
             data = request.get_json() or {}
@@ -743,12 +754,26 @@ def register_api_routes(app, services: Services) -> None:
             }
 
             pdf_path = report_generator.generate_portfolio_pdf(portfolio_payload)
+            
+            # --- S3 Upload Integration ---
+            from ..storage import upload_to_s3
+            s3_url = upload_to_s3(pdf_path)
+            
+            final_url = f"/reports/{os.path.basename(pdf_path)}"
+            if s3_url:
+                final_url = s3_url
+                # Em ambiente efêmero, podemos remover o arquivo local
+                try:
+                    os.remove(pdf_path)
+                except:
+                    pass
+            # -----------------------------
 
             return jsonify(
                 {
                     "status": "success",
                     "filename": os.path.basename(pdf_path),
-                    "url": f"/reports/{os.path.basename(pdf_path)}",
+                    "url": final_url,
                     "start_date": start_date,
                     "end_date": end_date,
                     "count": len(assets),
@@ -861,13 +886,27 @@ def register_api_routes(app, services: Services) -> None:
                     logger.warning(f"Falha ao gerar chart para swing trade {op.symbol} {tf}: {exc}")
 
             pdf_path = report_generator.generate_pdf_report(op, chart_images)
-            database.update_swing_trade_pdf(int(trade_id), pdf_path)
+            
+            # --- S3 Upload Integration ---
+            from ..storage import upload_to_s3
+            s3_url = upload_to_s3(pdf_path)
+            
+            final_url = f"/reports/{os.path.basename(pdf_path)}"
+            if s3_url:
+                final_url = s3_url
+                try:
+                    os.remove(pdf_path)
+                except:
+                    pass
+            # -----------------------------
+            
+            database.update_swing_trade_pdf(int(trade_id), final_url)
 
             return jsonify(
                 {
                     "status": "success",
                     "filename": os.path.basename(pdf_path),
-                    "url": f"/reports/{os.path.basename(pdf_path)}",
+                    "url": final_url,
                 }
             )
             
@@ -935,13 +974,27 @@ def register_api_routes(app, services: Services) -> None:
                         )
 
             pdf_path = report_generator.generate_day_trade_pdf(session, charts_payload)
-            database.update_day_trade_session_pdf(int(session_id), pdf_path)
+            
+            # --- S3 Upload Integration ---
+            from ..storage import upload_to_s3
+            s3_url = upload_to_s3(pdf_path)
+            
+            final_url = f"/reports/{os.path.basename(pdf_path)}"
+            if s3_url:
+                final_url = s3_url
+                try:
+                    os.remove(pdf_path)
+                except:
+                    pass
+            # -----------------------------
+            
+            database.update_day_trade_session_pdf(int(session_id), final_url)
 
             return jsonify(
                 {
                     "status": "success",
                     "filename": os.path.basename(pdf_path),
-                    "url": f"/reports/{os.path.basename(pdf_path)}",
+                    "url": final_url,
                 }
             )
 
@@ -950,22 +1003,35 @@ def register_api_routes(app, services: Services) -> None:
             return jsonify({"error": str(exc)}), 500
 
     @bp.route("/api/portfolio/<int:portfolio_id>/pdf", methods=["GET"])
+    @login_required
     def api_portfolio_pdf(portfolio_id):
-        """Generate PDF for a specific portfolio"""
         try:
             portfolio = database.get_portfolio(int(portfolio_id))
+
             
             if not portfolio:
                 return jsonify({"error": "Carteira não encontrada"}), 404
 
             pdf_path = report_generator.generate_portfolio_pdf(portfolio)
-            database.update_portfolio_pdf(int(portfolio_id), pdf_path)
+            
+            # --- S3 Upload Integration ---
+            from ..storage import upload_to_s3
+            s3_url = upload_to_s3(pdf_path)
+            
+            final_url = f"/reports/{os.path.basename(pdf_path)}"
+            if s3_url:
+                final_url = s3_url
+                # No need to remove here as upload_to_s3 already does it if successful, 
+                # but safeguard check is fine.
+            # -----------------------------
+
+            database.update_portfolio_pdf(int(portfolio_id), final_url)
 
             return jsonify(
                 {
                     "status": "success",
                     "filename": os.path.basename(pdf_path),
-                    "url": f"/reports/{os.path.basename(pdf_path)}",
+                    "url": final_url,
                 }
             )
             

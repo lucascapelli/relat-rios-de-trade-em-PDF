@@ -14,6 +14,7 @@ from .config import (
     PRICE_CACHE_EXPIRY,
     PROJECT_ROOT,
     REPORTS_DIR,
+    SECRET_KEY,
 )
 from .database import Database
 from .market_data import FinanceData
@@ -23,8 +24,9 @@ from .routes.api import register_api_routes
 from .routes.socket_handlers import register_socket_handlers
 from .services import Services
 from .utils import logger
+from .auth import bp_auth
 
-socketio = SocketIO(cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(cors_allowed_origins="*")
 
 
 def create_services(socketio_instance: SocketIO) -> Services:
@@ -53,12 +55,14 @@ def create_app(start_background: bool = False) -> Flask:
         static_folder=str(PROJECT_ROOT / "static"),
         template_folder=str(PROJECT_ROOT / "templates"),
     )
-    app.config.setdefault("SECRET_KEY", DEFAULT_SECRET_KEY)
+    app.config["SECRET_KEY"] = SECRET_KEY
 
     socketio.init_app(app, cors_allowed_origins="*", async_mode="threading")
 
     services = create_services(socketio)
     app.extensions["services"] = services
+
+    app.register_blueprint(bp_auth)
 
     register_api_routes(app, services)
     register_socket_handlers(socketio, services)

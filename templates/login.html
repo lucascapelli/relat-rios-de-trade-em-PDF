@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Login - Relatórios Trade</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            background: linear-gradient(120deg, #232526 0%, #414345 100%);
+            font-family: 'Segoe UI', Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .login-container {
+            background: #fff;
+            padding: 2.5rem 2rem;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+            min-width: 320px;
+            max-width: 350px;
+        }
+        h2 {
+            text-align: center;
+            color: #232526;
+            margin-bottom: 1.5rem;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #414345;
+            font-weight: 500;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 0.7rem;
+            margin-bottom: 1.2rem;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 1rem;
+            background: #f7f7f7;
+        }
+        button {
+            width: 100%;
+            padding: 0.8rem;
+            background: linear-gradient(90deg, #FFD700 0%, #232526 100%);
+            color: #232526;
+            border: none;
+            border-radius: 6px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: linear-gradient(90deg, #232526 0%, #FFD700 100%);
+            color: #fff;
+        }
+        .error {
+            color: #d32f2f;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h2>Relatórios Trade</h2>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <form method="post">
+            <label for="username">Usuário</label>
+            <input type="text" name="username" id="username" required autofocus>
+            <label for="password">Senha</label>
+            <input type="password" name="password" id="password" required>
+            <button type="submit">Entrar</button>
+        </form>
+    </div>
+</body>
+</html>

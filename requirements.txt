@@ -8,3 +8,8 @@ flask-socketio
 eventlet
 reportlab
 pandas_ta
+gunicorn
+
+boto3
+
+python-dotenv
