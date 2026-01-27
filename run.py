@@ -41,15 +41,15 @@ def main(app=None) -> None:
         logger.info("🔁 Processo principal do Flask")
         start_background_tasks(services)
 
-        if should_open_browser():
-            def _open_browser_once() -> None:
-                time.sleep(2)
-                webbrowser.open("http://127.0.0.1:5000")
-                logger.info("🌐 Navegador aberto automaticamente")
+        # if should_open_browser():
+        #     def _open_browser_once() -> None:
+        #         time.sleep(2)
+        #         webbrowser.open("http://127.0.0.1:5000")
+        #         logger.info("🌐 Navegador aberto automaticamente")
 
-            threading.Thread(target=_open_browser_once, daemon=True).start()
-        else:
-            logger.info("🌐 Navegador já foi aberto (pulando)")
+        #     threading.Thread(target=_open_browser_once, daemon=True).start()
+        # else:
+        #     logger.info("🌐 Navegador já foi aberto (pulando)")
 
         logger.info("✅ Servidor disponível em http://127.0.0.1:5000")
     else:
