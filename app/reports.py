@@ -160,12 +160,109 @@ class ModernReportGenerator:
         self, session: Dict[str, Any], charts: Optional[List[ChartPayload]] = None
     ) -> str:
         """Gera PDF day trade layout Castling."""
+        # Log detalhado do session para depuração
+        self._log.info(f"[PDF SESSION] {session}")
+
         trade_date = str(session.get("trade_date") or datetime.now(BR_TZ).strftime("%d/%m/%Y"))
-        symbol = str(session.get("symbol", "")).upper() or "TRADE"
+        # Corrige symbol: aceita 'symbol', 'ticker', 'ativo', 'underlying', 'asset', ou entries[0]['symbol']
+        symbol = (
+            str(
+                session.get("symbol")
+                or session.get("ticker")
+                or session.get("ativo")
+                or session.get("underlying")
+                or session.get("asset")
+                or (session.get("entries") and isinstance(session["entries"], list) and session["entries"] and session["entries"][0].get("symbol"))
+                or ""
+            ).upper()
+        ) or "TRADE"
         timestamp = datetime.now(BR_TZ)
         safe_date = trade_date.replace("/", "-")
         filename = f"castling_{symbol}_{safe_date}_{timestamp.strftime('%H%M%S')}.pdf"
         output_path = os.path.join(self.reports_dir, filename)
+
+        # Determina tipo de operação e compra/venda para o título
+
+        # Detecta tipo de trade (Swing/Day) de forma robusta
+        # Critérios para swing: campo is_swing, trade_type, timeframe_major, timeframe_minor, keywords
+        is_swing = False
+        trade_type_raw = str(session.get("trade_type") or session.get("tipo_operacao") or "").lower()
+        tf_major = str(session.get("timeframe_major") or session.get("timeframe") or "").lower()
+        tf_minor = str(session.get("timeframe_minor") or "").lower()
+        # 1. Campo explícito
+        if session.get("is_swing") is True or str(session.get("is_swing")).lower() == "true":
+            is_swing = True
+        # 2. trade_type ou tipo_operacao
+        elif trade_type_raw.startswith("swing"):
+            is_swing = True
+        elif trade_type_raw.startswith("day"):
+            is_swing = False
+        # 3. Timeframes típicos
+        elif tf_major in ("diario", "daily", "1d", "semanal", "weekly", "1w", "d", "w"):
+            is_swing = True
+        elif tf_minor in ("diario", "daily", "1d", "semanal", "weekly", "1w", "d", "w"):
+            is_swing = True
+        # 4. Keywords no dict
+        elif "swing" in str(session).lower():
+            is_swing = True
+        elif "day" in str(session).lower():
+            is_swing = False
+        # 5. Fallback: timeframe não intraday
+        elif tf_major and tf_major not in ("15m", "5m", "1min", "15min", "1h", "60m", ""):
+            is_swing = True
+        elif tf_minor and tf_minor not in ("15m", "5m", "1min", "15min", "1h", "60m", ""):
+            is_swing = True
+        trade_type = "Swing Trade" if is_swing else "Day Trade"
+
+        # Detecta compra/venda de forma robusta
+        # Procura campos mais prováveis, inclusive dentro de entries[0]
+        tipo = (
+            session.get("tipo")
+            or session.get("direction")
+            or session.get("operation_type")
+            or session.get("side")
+            or session.get("trade_direction")
+        )
+        # Se não achou, tenta entries[0]['direction']
+        if (tipo is None or str(tipo).strip() == "") and session.get("entries") and isinstance(session["entries"], list) and session["entries"]:
+            tipo = session["entries"][0].get("direction")
+        if tipo is None or str(tipo).strip() == "":
+            # Fallback: busca direction, depois palavras-chave, depois campos conhecidos
+            direction = str(session.get("direction") or session.get("side") or "").upper()
+            if direction in ("LONG", "BUY", "COMPRA"):
+                tipo = "COMPRA"
+            elif direction in ("SHORT", "SELL", "VENDA"):
+                tipo = "VENDA"
+            elif direction in ("C",):
+                tipo = "COMPRA"
+            elif direction in ("V",):
+                tipo = "VENDA"
+            elif "venda" in str(session).lower() or "short" in str(session).lower():
+                tipo = "VENDA"
+            elif "compra" in str(session).lower() or "long" in str(session).lower():
+                tipo = "COMPRA"
+            else:
+                tipo = "COMPRA"
+        else:
+            tipo = str(tipo).strip().upper()
+            # Mapeia C/V para COMPRA/VENDA
+            if tipo == "C":
+                tipo = "COMPRA"
+            elif tipo == "V":
+                tipo = "VENDA"
+            elif tipo not in ("COMPRA", "VENDA"):
+                if tipo in ("BUY", "LONG"):
+                    tipo = "COMPRA"
+                elif tipo in ("SELL", "SHORT"):
+                    tipo = "VENDA"
+                else:
+                    # Tenta extrair da string
+                    if "venda" in tipo or "sell" in tipo or "short" in tipo:
+                        tipo = "VENDA"
+                    elif "compra" in tipo or "buy" in tipo or "long" in tipo:
+                        tipo = "COMPRA"
+                    else:
+                        tipo = "COMPRA"
 
         doc = SimpleDocTemplate(
             output_path,
@@ -174,7 +271,7 @@ class ModernReportGenerator:
             rightMargin=15 * mm,
             topMargin=50 * mm, 
             bottomMargin=15 * mm,
-            title=f"{symbol} Day Trade",
+            title=f"{symbol} {trade_type} {tipo}",
             author=INSTITUTION_NAME,
         )
 
@@ -183,9 +280,8 @@ class ModernReportGenerator:
 
         # -- PÁGINA 1
         
-        # Intro
-        story.append(Paragraph("Texto feito pela ia referente ao trade...", styles["Intro"]))
-        story.append(Spacer(1, 10 * mm))
+        # Intro (removido, será adicionado após os gráficos)
+        analytical_text = session.get("analytical_text") or session.get("observacoes") or "Aguardando texto padrão do Gustavo"
 
         # Layout: Tabela Detalhes (Col 1) | Gráfico Principal (Col 2)
         details_table = self._create_details_table(session, styles)
@@ -237,12 +333,12 @@ class ModernReportGenerator:
         # Filter used charts
         used_charts = [main_chart_data] if main_chart_data else []
         remaining = [c for c in decoded if c not in used_charts]
-        
+
         # Mapeando por prioridade
         chart_d = next((c for c in remaining if "1d" in c["timeframe"]), None)
         chart_h = next((c for c in remaining if "60m" in c["timeframe"] or "1h" in c["timeframe"]), None)
         chart_w = next((c for c in remaining if "1w" in c["timeframe"]), None)
-        
+
         # Row 1: Daily + Hourly
         row1_cells = []
         if chart_d:
@@ -250,19 +346,19 @@ class ModernReportGenerator:
             if img: row1_cells.append([Paragraph("Velas diárias", styles["ChartLabel"]), img])
             else: row1_cells.append("")
         else: row1_cells.append("")
-            
+
         if chart_h:
             img = self._create_chart_image(chart_h, 85*mm, 50*mm)
             if img: row1_cells.append([Paragraph("Velas de 60 minutos", styles["ChartLabel"]), img])
             else: row1_cells.append("")
         else:
-             row1_cells.append("")
-             
+            row1_cells.append("")
+
         if any(row1_cells):
             t_charts1 = Table([row1_cells], colWidths=[90*mm, 90*mm], vAlign="TOP")
             story.append(t_charts1)
             story.append(Spacer(1, 5 * mm))
-            
+
         # Row 2: Weekly
         if chart_w:
             img = self._create_chart_image(chart_w, 85*mm, 50*mm)
@@ -270,6 +366,10 @@ class ModernReportGenerator:
                 story.append(Paragraph("Velas semanais", styles["ChartLabel"]))
                 story.append(img)
 
+        # Adiciona o texto analítico após os gráficos
+        story.append(Spacer(1, 8 * mm))
+        story.append(Paragraph(analytical_text, styles["Intro"]))
+        story.append(Spacer(1, 10 * mm))
 
         story.append(PageBreak())
 
@@ -421,7 +521,34 @@ class ModernReportGenerator:
         return decoded
         
     def generate_pdf_report(self, operation: Operation, charts: List[ChartPayload]) -> str:
-        # Wrapper
+        # Detecta se é swing trade
+        is_swing = False
+        trade_type = getattr(operation, "trade_type", None) or getattr(operation, "tipo_operacao", None) or ""
+        tf_major = getattr(operation, "timeframe_major", None) or getattr(operation, "timeframe", None) or ""
+        tf_minor = getattr(operation, "timeframe_minor", None) or ""
+        if getattr(operation, "is_swing", False) is True or str(getattr(operation, "is_swing", "")).lower() == "true":
+            is_swing = True
+        elif str(trade_type).lower().startswith("swing"):
+            is_swing = True
+        elif str(trade_type).lower().startswith("day"):
+            is_swing = False
+        elif str(tf_major).lower() in ("diario", "daily", "1d", "semanal", "weekly", "1w", "d", "w"):
+            is_swing = True
+        elif str(tf_minor).lower() in ("diario", "daily", "1d", "semanal", "weekly", "1w", "d", "w"):
+            is_swing = True
+        # Monta o session com o campo is_swing
+        # Detecta direção (COMPRA/VENDA) de forma robusta
+        direction = None
+        if hasattr(operation, "tipo") and operation.tipo:
+            direction = str(operation.tipo).strip().upper()
+        elif hasattr(operation, "direction") and operation.direction:
+            direction = str(operation.direction).strip().upper()
+        elif hasattr(operation, "side") and operation.side:
+            direction = str(operation.side).strip().upper()
+        # fallback: assume COMPRA
+        if not direction:
+            direction = "COMPRA"
+
         session = {
             "symbol": operation.symbol,
             "trade_date": datetime.now(BR_TZ).strftime("%d/%m/%Y"),
@@ -434,7 +561,13 @@ class ModernReportGenerator:
             "partial_points": operation.parcial_pontos,
             "target_points": operation.pontos_alvo,
             "stop_loss_points": operation.pontos_stop,
-            "risk_zero": operation.risco_retorno
+            "risk_zero": operation.risco_retorno,
+            "analytical_text": getattr(operation, "analytical_text", None) or getattr(operation, "observacoes", None) or "Aguardando texto padrão do Gustavo",
+            "is_swing": is_swing,
+            "trade_type": trade_type,
+            "timeframe_major": tf_major,
+            "timeframe_minor": tf_minor,
+            "tipo": direction,
         }
         return self.generate_day_trade_pdf(session, charts)
 
