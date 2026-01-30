@@ -11,6 +11,7 @@ from .config import (
     CHART_CACHE_EXPIRY,
     DB_PATH,
     DEFAULT_SECRET_KEY,
+    NEWS_CACHE_EXPIRY,
     PRICE_CACHE_EXPIRY,
     PROJECT_ROOT,
     REPORTS_DIR,
@@ -46,6 +47,7 @@ def create_services(socketio_instance: SocketIO) -> Services:
         realtime_manager=realtime_manager,
         price_cache=price_cache,
         chart_cache=chart_cache,
+        news_cache=CacheManager(NEWS_CACHE_EXPIRY),
     )
 
 

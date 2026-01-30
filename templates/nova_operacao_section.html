@@ -27,8 +27,8 @@
             </div>
         </div>
 
-        <!-- Global Filters -->
-        <div class="row mb-4 justify-content-center">
+        <!-- Global Filters (exibido apenas para Swing/Day Trade) -->
+        <div id="global-filters-row" class="row mb-4 justify-content-center">
             <div class="col-lg-10">
                 <div class="card">
                     <div class="card-body">
@@ -180,13 +180,10 @@
                                 <!-- Analytical Text -->
                                 <div class="mb-3">
                                     <label class="form-label">Texto Analítico</label>
-                                    <textarea class="form-control" id="swing-analytical-text" rows="4" placeholder="Aguardando texto padrão do Gustavo"></textarea>
+                                    <textarea class="form-control" id="swing-analytical-text" rows="4" placeholder="Escreva um texto ou gere um texto padrão em ' gerar texto padrão '"></textarea>
                                     <div class="d-flex gap-2 mt-2">
                                         <button type="button" class="btn btn-sm btn-outline-secondary" id="swing-generate-ai-text">
                                             <i class="fas fa-robot me-1"></i>Gerar texto padrão
-                                        </button>
-                                        <button type="button" class="btn btn-sm btn-outline-info" id="swing-update-pdf-text">
-                                            <i class="fas fa-sync me-1"></i>Atualizar texto do PDF
                                         </button>
                                     </div>
                                 </div>

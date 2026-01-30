@@ -1029,44 +1029,83 @@ class TradingApp {
     }
     
     updateStatistics() {
-        const total = this.operations.length;
-        const success = this.operations.filter(op => (op.status || '').includes('ALVO')).length;
-        const stops = this.operations.filter(op => (op.status || '').includes('STOP')).length;
-        const open = this.operations.filter(op => (op.status || '') === 'ABERTA').length;
+        // Função auxiliar para identificar Swing Trade
+        function isSwing(op) {
+            // Novo critério: se vier do backend como 'swing_trade', é swing
+            if (op.source === 'swing_trade') return true;
+            // Critérios antigos para compatibilidade
+            const tradeType = (op.trade_type || op.tipo_operacao || '').toLowerCase();
+            const tfMajor = (op.timeframe_major || op.timeframe || '').toLowerCase();
+            if (op.is_swing === true || String(op.is_swing).toLowerCase() === 'true') return true;
+            if (tradeType.startsWith('swing')) return true;
+            if (tradeType.startsWith('day')) return false;
+            if (["diario","daily","1d","semanal","weekly","1w","d","w"].includes(tfMajor)) return true;
+            if (String(op.trade_type || op.tipo_operacao || '').toLowerCase().includes('swing')) return true;
+            return false;
+        }
 
-        document.getElementById('stats-operations').textContent = total;
-        document.getElementById('success-count').textContent = success;
-        document.getElementById('stop-count').textContent = stops;
-        document.getElementById('open-count').textContent = open;
+        // Filtro de operações da semana atual
+        function isThisWeek(op) {
+            if (!op.created_at) return false;
+            const opDate = new Date(op.created_at);
+            const now = new Date();
+            // Início da semana (segunda-feira)
+            const weekStart = new Date(now);
+            weekStart.setHours(0,0,0,0);
+            weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+            // Fim da semana (domingo)
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekStart.getDate() + 6);
+            weekEnd.setHours(23,59,59,999);
+            return opDate >= weekStart && opDate <= weekEnd;
+        }
 
-        const closed = success + stops;
-        const winRate = closed > 0 ? ((success / closed) * 100).toFixed(1) : 0;
-        document.getElementById('win-rate').textContent = `${winRate}%`;
-        document.getElementById('stats-winrate').textContent = `${winRate}%`;
+        // Separa operações da semana
+        const swingOps = this.operations.filter(op => isSwing(op) && isThisWeek(op));
+        const dayOps = this.operations.filter(op => !isSwing(op) && isThisWeek(op));
 
-        let profit = 0;
-        this.operations.forEach(op => {
-            const qty = Number(op.quantidade) || 0;
-            if (!qty) {
-                return;
-            }
-            const entrada = Number(op.entrada) || 0;
-            const alvo = Number(op.alvo) || 0;
-            const stop = Number(op.stop) || 0;
-            const tipo = (op.tipo || 'COMPRA').toUpperCase();
-            const targetDiff = tipo === 'COMPRA' ? (alvo - entrada) : (entrada - alvo);
-            const stopDiff = tipo === 'COMPRA' ? (entrada - stop) : (stop - entrada);
+        // Função para calcular estatísticas
+        function calcStats(ops) {
+            const total = ops.length;
+            const success = ops.filter(op => (op.status || '').includes('ALVO')).length;
+            const stops = ops.filter(op => (op.status || '').includes('STOP')).length;
+            const closed = success + stops;
+            const winRate = closed > 0 ? ((success / closed) * 100).toFixed(1) : 0;
+            let profit = 0;
+            ops.forEach(op => {
+                const qty = Number(op.quantidade) || 0;
+                if (!qty) return;
+                const entrada = Number(op.entrada) || 0;
+                const alvo = Number(op.alvo) || 0;
+                const stop = Number(op.stop) || 0;
+                const tipo = (op.tipo || 'COMPRA').toUpperCase();
+                const targetDiff = tipo === 'COMPRA' ? (alvo - entrada) : (entrada - alvo);
+                const stopDiff = tipo === 'COMPRA' ? (entrada - stop) : (stop - entrada);
+                if ((op.status || '').includes('ALVO')) {
+                    profit += Math.max(targetDiff, 0) * qty;
+                } else if ((op.status || '').includes('STOP')) {
+                    profit -= Math.max(stopDiff, 0) * qty;
+                }
+            });
+            const assets = new Set(ops.map(op => op.symbol)).size;
+            return { total, profit, winRate, assets };
+        }
 
-            if ((op.status || '').includes('ALVO')) {
-                profit += Math.max(targetDiff, 0) * qty;
-            } else if ((op.status || '').includes('STOP')) {
-                profit -= Math.max(stopDiff, 0) * qty;
-            }
-        });
+        // Calcula estatísticas
+        const swingStats = calcStats(swingOps);
+        const dayStats = calcStats(dayOps);
 
-        document.getElementById('stats-profit').textContent = this.formatCurrency(profit);
-        document.getElementById('stats-assets').textContent =
-            new Set(this.operations.map(op => op.symbol)).size;
+        // Atualiza blocos Swing
+        document.getElementById('stats-operations-swing').textContent = swingStats.total;
+        document.getElementById('stats-profit-swing').textContent = this.formatCurrency(swingStats.profit);
+        document.getElementById('stats-winrate-swing').textContent = `${swingStats.winRate}%`;
+        document.getElementById('stats-assets-swing').textContent = swingStats.assets;
+
+        // Atualiza blocos Day
+        document.getElementById('stats-operations-day').textContent = dayStats.total;
+        document.getElementById('stats-profit-day').textContent = this.formatCurrency(dayStats.profit);
+        document.getElementById('stats-winrate-day').textContent = `${dayStats.winRate}%`;
+        document.getElementById('stats-assets-day').textContent = dayStats.assets;
     }
     
     getStatusBadgeClass(status) {
@@ -1808,5 +1847,43 @@ class TradingApp {
 
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
+    // Carregar notícias do mercado
+    loadMarketNews();
+
     window.tradingApp = new TradingApp();
+
+    // Preencher automaticamente o campo 'Ativo' de Day Trade ao clicar em um atalho de ativo global
+    document.getElementById('asset-shortcuts')?.addEventListener('click', function(e) {
+        const btn = e.target.closest('button');
+        if (btn && btn.classList.contains('asset-shortcut-btn') && document.getElementById('dt-entry-symbol')) {
+            document.getElementById('dt-entry-symbol').value = btn.textContent.trim();
+        }
+    });
 });
+
+// Função para carregar notícias do mercado
+function loadMarketNews() {
+    const container = document.getElementById('market-news');
+    if (!container) return;
+
+    fetch('/api/news')
+        .then(response => response.json())
+        .then(news => {
+            if (!news || news.length === 0) {
+                container.innerHTML = '<p class="text-muted">Nenhuma notícia encontrada.</p>';
+                return;
+            }
+            container.innerHTML = news.map(item => `
+                <div class="alert alert-info mb-2">
+                    <small>
+                        <strong><a href="${item.link}" target="_blank" class="text-decoration-none">${item.title}</a></strong>
+                        ${item.published ? `<br><small class="text-muted">${item.published}</small>` : ''}
+                    </small>
+                </div>
+            `).join('');
+        })
+        .catch(error => {
+            console.error('Erro ao carregar notícias:', error);
+            container.innerHTML = '<p class="text-muted">Erro ao carregar notícias.</p>';
+        });
+}

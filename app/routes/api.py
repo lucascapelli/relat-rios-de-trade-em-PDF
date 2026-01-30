@@ -98,6 +98,28 @@ def register_api_routes(app, services: Services) -> None:
     chart_generator = services.chart_generator
     database = services.database
     report_generator = services.report_generator
+    news_cache = services.news_cache
+
+    @bp.route("/api/news")
+    def api_news():
+        """Retorna as últimas notícias do mercado (RSS)."""
+        import feedparser
+
+        FEED_URL = "https://www.infomoney.com.br/mercados/rss/"
+        cached_news = news_cache.get("market_news")
+        if cached_news:
+            return jsonify(cached_news)
+
+        feed = feedparser.parse(FEED_URL)
+        news = []
+        for entry in feed.entries[:5]:
+            news.append({
+                "title": entry.title,
+                "link": entry.link,
+                "published": entry.get("published", "")
+            })
+        news_cache.set("market_news", news)
+        return jsonify(news)
 
     def _parse_iso_date(value: Optional[str]):
         from datetime import datetime
@@ -463,15 +485,13 @@ def register_api_routes(app, services: Services) -> None:
         try:
             operations = database.get_operations(50)
 
-            # Inclui swing trades no histórico (novo fluxo usa swing/day trade e não preenche mais `operations`).
+            # Inclui swing trades no histórico
             swing_trades = database.get_swing_trades(limit=100)
             swing_ops: List[Dict[str, Any]] = []
-
             for swing in swing_trades:
                 try:
                     direction = str(swing.get("direction") or "LONG").upper()
                     tipo = "COMPRA" if direction == "LONG" else "VENDA"
-
                     op_model = Operation(
                         symbol=str(swing.get("symbol") or "").upper(),
                         tipo=tipo,
@@ -484,26 +504,57 @@ def register_api_routes(app, services: Services) -> None:
                         entrada_max=swing.get("entry_max"),
                         observacoes=str(swing.get("analytical_text") or ""),
                     )
-
                     op_dict = asdict(op_model)
-                    op_dict.update(
-                        {
-                            "id": f"swing-{swing.get('id')}",
-                            "pdf_path": swing.get("pdf_path"),
-                            "created_at": swing.get("created_at") or swing.get("trade_date"),
-                            "status": swing.get("status") or "ABERTA",
-                            "source": "swing_trade",
-                        }
-                    )
+                    op_dict.update({
+                        "id": f"swing-{swing.get('id')}",
+                        "pdf_path": swing.get("pdf_path"),
+                        "created_at": swing.get("created_at") or swing.get("trade_date"),
+                        "status": swing.get("status") or "ABERTA",
+                        "source": "swing_trade",
+                    })
                     swing_ops.append(op_dict)
                 except Exception as exc:
                     logger.warning("Falha ao mapear swing trade para histórico: %s", exc, exc_info=True)
+
+            # Inclui day trade sessions no histórico
+            daytrade_sessions = database.get_day_trade_sessions(limit=100)
+            daytrade_ops: List[Dict[str, Any]] = []
+            for session in daytrade_sessions:
+                session_id = session.get("id")
+                created_at = session.get("created_at") or session.get("trade_date")
+                timeframe = session.get("timeframe_major") or "1h"
+                entries = session.get("entries", [])
+                for idx, entry in enumerate(entries):
+                    direction = str(entry.get("direction") or "C").upper()
+                    tipo = "COMPRA" if direction in ("C", "COMPRA", "LONG") else "VENDA"
+                    op_model = Operation(
+                        symbol=str(entry.get("symbol") or "").upper(),
+                        tipo=tipo,
+                        entrada=float(entry.get("entry") or 0),
+                        stop=float(entry.get("stop") or 0),
+                        alvo=float(entry.get("target") or 0),
+                        quantidade=1,  # Day trade não tem quantidade por entrada
+                        timeframe=timeframe,
+                        entrada_min=None,
+                        entrada_max=None,
+                        observacoes="DAY TRADE",
+                    )
+                    op_dict = asdict(op_model)
+                    op_dict.update({
+                        "id": f"daytrade-{session_id}-{idx}",
+                        "pdf_path": session.get("pdf_path"),
+                        "created_at": created_at,
+                        "status": "ABERTA",
+                        "source": "daytrade",
+                        "session_id": session_id,
+                    })
+                    daytrade_ops.append(op_dict)
 
             # Marca origem para diferenciar e faz merge.
             for op in operations:
                 op.setdefault("source", "operation")
 
-            merged = operations + swing_ops
+            merged = operations + swing_ops + daytrade_ops
 
             def _sort_key(item: Dict[str, Any]):
                 ts = pd.to_datetime(item.get("created_at"), errors="coerce")

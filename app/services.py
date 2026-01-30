@@ -21,6 +21,7 @@ class Services:
     realtime_manager: RealTimeManager
     price_cache: CacheManager
     chart_cache: CacheManager
+    news_cache: CacheManager
 
 
 __all__ = ["Services"]

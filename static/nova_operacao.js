@@ -54,7 +54,13 @@ class NovaOperacaoManager {
         this.currentMode = mode;
         // Hide all containers
         document.querySelectorAll('.mode-container').forEach(el => el.style.display = 'none');
-        
+
+        // Oculta Filtros Globais na aba Carteiras
+        const filtersRow = document.getElementById('global-filters-row');
+        if (filtersRow) {
+            filtersRow.style.display = (mode === 'portfolio') ? 'none' : '';
+        }
+
         // Show selected container
         const containers = {
             'swing': 'swing-trade-container',
@@ -457,6 +463,10 @@ class NovaOperacaoManager {
                 this.renderDayTradeEntries();
                 document.getElementById('daytrade-form')?.reset();
                 this.setDefaultDates();
+                // Atualiza estatísticas rápidas do dashboard
+                if (window.tradingApp && typeof window.tradingApp.loadOperationsHistory === 'function') {
+                    window.tradingApp.loadOperationsHistory();
+                }
             } else {
                 this.showToast('Erro: ' + (result.error || 'Erro desconhecido'), 'danger');
             }
