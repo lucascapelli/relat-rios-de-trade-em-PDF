@@ -75,14 +75,29 @@ class NovaOperacaoManager {
     }
 
     // ========== SWING TRADE ==========
+
+
     setupSwingTrade() {
         const form = document.getElementById('swing-trade-form');
         if (!form) return;
 
-        // Calculate percentages on input
+        // Cálculo automático de percentuais
         ['swing-entry', 'swing-target', 'swing-stop'].forEach(id => {
             document.getElementById(id)?.addEventListener('input', () => this.calculateSwingPercentages());
         });
+
+        // Atualizar pré-visualização ao alterar campos relevantes
+        const previewFields = [
+            'swing-symbol', 'swing-entry', 'swing-entry-max',
+            'swing-target', 'swing-stop', 'swing-partial-exit', 'swing-partial'
+        ];
+        previewFields.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('input', () => this.updateSwingPreview());
+            }
+        });
+        this.updateSwingPreview();
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -98,6 +113,74 @@ class NovaOperacaoManager {
         document.getElementById('swing-update-pdf-text')?.addEventListener('click', () => {
             this.showToast('Funcionalidade de atualização de PDF será implementada', 'info');
         });
+
+        // Atalhos de ativos por classe
+        setTimeout(() => {
+            const assetClassSelect = document.getElementById('filter-asset-class');
+            const assetShortcutsDiv = document.getElementById('asset-shortcuts');
+            if (assetClassSelect && assetShortcutsDiv) {
+                const shortcuts = {
+                    'ACOES': ['PETR4', 'VALE3', 'ITUB4', 'BBDC4'],
+                    'DOLAR': ['DOL1!', 'WDOFUT', 'DOLFUT', 'DOLQ24'],
+                    'INDICE': ['IBOV', 'WINFUT', 'IND1!', 'IBX100'],
+                    'BITCOIN': ['BTC-USD', 'BTCBRL', 'BTCUSDT', 'XBTUSD'],
+                    'SP500': ['SPX', 'SPY', 'IVVB11', 'ES1!'],
+                    'BOI': ['BGIQ24', 'BGIFUT', 'BGI1!', 'BGIV24'],
+                    'MILHO': ['CCMFUT', 'CCM1!', 'CCMQ24', 'CCMV24'],
+                    'CUSTOM': []
+                };
+                function renderShortcuts(classe) {
+                    const ativos = shortcuts[classe] || [];
+                    if (ativos.length === 0) {
+                        assetShortcutsDiv.innerHTML = '';
+                        return;
+                    }
+                    assetShortcutsDiv.innerHTML = '<div class="d-flex flex-wrap gap-2">' + ativos.map(a => `<button type="button" class="btn btn-outline-secondary btn-sm asset-shortcut-btn">${a}</button>`).join('') + '</div>';
+                    assetShortcutsDiv.querySelectorAll('.asset-shortcut-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            document.getElementById('swing-symbol').value = btn.textContent;
+                            this.updateSwingPreview();
+                        });
+                    });
+                }
+                assetClassSelect.addEventListener('change', (e) => {
+                    renderShortcuts(e.target.value);
+                });
+                // Render inicial se não for ALL
+                if (assetClassSelect.value && assetClassSelect.value !== 'ALL') {
+                    renderShortcuts(assetClassSelect.value);
+                } else {
+                    assetShortcutsDiv.innerHTML = '';
+                }
+            }
+        }, 0);
+    }
+
+
+    updateSwingPreview() {
+        // Pega valores dos campos
+        const ticker = document.getElementById('swing-symbol')?.value || '';
+        const entry = document.getElementById('swing-entry')?.value || '';
+        const entryMaxPercent = document.getElementById('swing-entry-max')?.value || '';
+        const entryMax = (() => {
+            const e = parseFloat(entry);
+            const p = parseFloat(entryMaxPercent);
+            if (e && p) return (e * (1 + p / 100)).toFixed(2);
+            return '';
+        })();
+        const partialExit = document.getElementById('swing-partial-exit')?.value || '';
+        const partial = document.getElementById('swing-partial')?.value || '';
+        const target = document.getElementById('swing-target')?.value || '';
+        const stop = document.getElementById('swing-stop')?.value || '';
+
+        document.getElementById('preview-ticker').textContent = ticker;
+        document.getElementById('preview-entry').textContent = entry;
+        document.getElementById('preview-entry-min').textContent = entry; // Campo removido, usar entrada
+        document.getElementById('preview-entry-max').textContent = entryMax;
+        document.getElementById('preview-partial-exit').textContent = partialExit;
+        document.getElementById('preview-partial').textContent = partial;
+        document.getElementById('preview-target').textContent = target;
+        document.getElementById('preview-stop').textContent = stop;
     }
 
     calculateSwingPercentages() {
@@ -115,15 +198,18 @@ class NovaOperacaoManager {
     }
 
     async submitSwingTrade() {
+        const entry = parseFloat(document.getElementById('swing-entry')?.value);
+        const entryMin = parseFloat(document.getElementById('swing-entry-min')?.value) || entry;
+        const entryMaxPercent = parseFloat(document.getElementById('swing-entry-max')?.value);
+        const entryMax = (entry && entryMaxPercent) ? (entry * (1 + entryMaxPercent / 100)) : entry;
         const data = {
             symbol: document.getElementById('swing-symbol')?.value,
             direction: document.getElementById('swing-direction')?.value,
-            entry: parseFloat(document.getElementById('swing-entry')?.value),
-            entry_min: parseFloat(document.getElementById('swing-entry-min')?.value) || parseFloat(document.getElementById('swing-entry')?.value),
-            entry_max: parseFloat(document.getElementById('swing-entry-max')?.value) || parseFloat(document.getElementById('swing-entry')?.value),
+            entry: entry,
+            entry_min: entryMin,
+            entry_max: entryMax,
             target: parseFloat(document.getElementById('swing-target')?.value),
             stop: parseFloat(document.getElementById('swing-stop')?.value),
-            quantity: parseInt(document.getElementById('swing-quantity')?.value),
             trade_date: document.getElementById('swing-trade-date')?.value,
             timeframe_major: document.getElementById('swing-tf-major')?.value,
             timeframe_minor: document.getElementById('swing-tf-minor')?.value,
@@ -650,17 +736,12 @@ class NovaOperacaoManager {
     }
 
     generateAIText(mode) {
-        // Placeholder for AI text generation
-        const texts = {
-            swing: 'Análise técnica gerada por IA: Ativo em tendência de alta com suporte em níveis importantes. Recomendação de entrada na faixa especificada com stop loss protetor.',
-            daytrade: 'Setup intraday identificado com alta probabilidade de sucesso baseado em padrões de candlestick e volume.',
-            portfolio: 'Carteira diversificada com foco em ações de alta qualidade e potencial de valorização de médio/longo prazo.'
-        };
-        
+        // Placeholder aguardando texto padrão do Gustavo
+        const textoPadrao = 'Aguardando texto padrão do Gustavo';
         const textareaId = mode === 'swing' ? 'swing-analytical-text' : 'portfolio-analytical-text';
         const textarea = document.getElementById(textareaId);
         if (textarea) {
-            textarea.value = texts[mode] || '';
+            textarea.value = textoPadrao;
             this.showToast('Texto gerado! Você pode editá-lo livremente', 'success');
         }
     }

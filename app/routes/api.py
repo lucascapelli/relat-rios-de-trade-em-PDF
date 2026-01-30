@@ -519,7 +519,6 @@ def register_api_routes(app, services: Services) -> None:
             return jsonify([])
 
     @bp.route("/reports/<path:filename>")
-    @login_required
     def serve_report(filename: str):
         # Tenta servir localmente primeiro (para dev local)
         try:

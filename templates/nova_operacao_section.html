@@ -34,16 +34,7 @@
                     <div class="card-body">
                         <h6 class="card-title"><i class="fas fa-filter me-2"></i>Filtros Globais</h6>
                         <div class="row">
-                            <div class="col-md-6 mb-2">
-                                <label class="form-label">Índice</label>
-                                <select class="form-select form-select-sm" id="filter-index">
-                                    <option value="ALL">Todos</option>
-                                    <option value="IBX100">IBX-100</option>
-                                    <option value="IBOV">IBOVESPA</option>
-                                    <option value="IDIV">IDIV</option>
-                                    <option value="SMLL">SMLL</option>
-                                </select>
-                            </div>
+                            <!-- Filtro de índice removido por solicitação do cliente -->
                             <div class="col-md-6 mb-2">
                                 <label class="form-label">Classe de Ativo</label>
                                 <select class="form-select form-select-sm" id="filter-asset-class">
@@ -57,6 +48,7 @@
                                     <option value="MILHO">Milho</option>
                                     <option value="CUSTOM">Lista Personalizada</option>
                                 </select>
+                                <div id="asset-shortcuts" class="mt-2"></div>
                             </div>
                         </div>
                     </div>
@@ -74,6 +66,28 @@
                         </div>
                         <div class="card-body">
                             <form id="swing-trade-form">
+                                <!-- Pré-visualização dos detalhes da operação -->
+                                <div class="card mb-3" id="preview-card">
+                                    <div class="card-header bg-info text-white py-2">
+                                        Pré-visualização da Operação
+                                    </div>
+                                    <div class="card-body p-2">
+                                        <div class="table-responsive">
+                                            <table class="table table-sm mb-0">
+                                                <tbody>
+                                                    <tr><th>Ticker</th><td id="preview-ticker"></td></tr>
+                                                    <tr><th>Entrada</th><td id="preview-entry"></td></tr>
+                                                    <tr><th>Entrada Mínima</th><td id="preview-entry-min"></td></tr>
+                                                    <tr><th>Entrada Máxima</th><td id="preview-entry-max"></td></tr>
+                                                    <tr><th>Saída Parcial</th><td id="preview-partial-exit"></td></tr>
+                                                    <tr><th>Parcial</th><td id="preview-partial"></td></tr>
+                                                    <tr><th>Alvo</th><td id="preview-target"></td></tr>
+                                                    <tr><th>Stop Loss</th><td id="preview-stop"></td></tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
                                 <!-- Ticker and Direction -->
                                 <div class="row mb-3">
                                     <div class="col-md-6">
@@ -89,19 +103,24 @@
                                     </div>
                                 </div>
 
-                                <!-- Entry Prices -->
+                                <!-- Entry Prices + Saída Parcial/Parcial -->
                                 <div class="row mb-3">
-                                    <div class="col-md-4">
-                                        <label class="form-label">Entrada Mínima</label>
-                                        <input type="number" step="0.01" class="form-control" id="swing-entry-min">
-                                    </div>
-                                    <div class="col-md-4">
+                                    <!-- Entrada Mínima removida por solicitação do cliente -->
+                                    <div class="col-md-3">
                                         <label class="form-label">Entrada <span class="text-danger">*</span></label>
                                         <input type="number" step="0.01" class="form-control" id="swing-entry" required>
                                     </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">Entrada Máxima</label>
-                                        <input type="number" step="0.01" class="form-control" id="swing-entry-max">
+                                    <div class="col-md-3">
+                                        <label class="form-label">Entrada Máxima (%)</label>
+                                        <input type="number" step="0.01" class="form-control" id="swing-entry-max" placeholder="Ex: 2 para 2% acima da entrada">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Saída Parcial (R$)</label>
+                                        <input type="number" step="0.01" class="form-control" id="swing-partial-exit" placeholder="Ex: 12.34">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Parcial (%)</label>
+                                        <input type="number" step="0.01" class="form-control" id="swing-partial" placeholder="Ex: 50 para 50%">
                                     </div>
                                 </div>
 
@@ -115,10 +134,7 @@
                                         <label class="form-label">Stop <span class="text-danger">*</span></label>
                                         <input type="number" step="0.01" class="form-control" id="swing-stop" required>
                                     </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">Quantidade <span class="text-danger">*</span></label>
-                                        <input type="number" class="form-control" id="swing-quantity" value="100" required>
-                                    </div>
+                                    <!-- Campo Quantidade removido por solicitação do cliente -->
                                 </div>
 
                                 <!-- Date and Timeframes -->
@@ -149,19 +165,11 @@
                                     <div class="card-body">
                                         <h6 class="card-title">Gestão de Risco</h6>
                                         <div class="row">
-                                            <div class="col-md-3">
-                                                <label class="form-label">Risco R$</label>
-                                                <input type="number" step="0.01" class="form-control" id="swing-risk-amount">
-                                            </div>
-                                            <div class="col-md-3">
-                                                <label class="form-label">Risco %</label>
-                                                <input type="number" step="0.01" class="form-control" id="swing-risk-percent">
-                                            </div>
-                                            <div class="col-md-3">
+                                            <div class="col-md-6">
                                                 <label class="form-label">Alvo %</label>
                                                 <input type="number" step="0.01" class="form-control" id="swing-target-percent" readonly>
                                             </div>
-                                            <div class="col-md-3">
+                                            <div class="col-md-6">
                                                 <label class="form-label">Stop %</label>
                                                 <input type="number" step="0.01" class="form-control" id="swing-stop-percent" readonly>
                                             </div>
@@ -172,10 +180,10 @@
                                 <!-- Analytical Text -->
                                 <div class="mb-3">
                                     <label class="form-label">Texto Analítico</label>
-                                    <textarea class="form-control" id="swing-analytical-text" rows="4" placeholder="Texto gerado por IA ou editado manualmente"></textarea>
+                                    <textarea class="form-control" id="swing-analytical-text" rows="4" placeholder="Aguardando texto padrão do Gustavo"></textarea>
                                     <div class="d-flex gap-2 mt-2">
                                         <button type="button" class="btn btn-sm btn-outline-secondary" id="swing-generate-ai-text">
-                                            <i class="fas fa-robot me-1"></i>Gerar com IA
+                                            <i class="fas fa-robot me-1"></i>Gerar texto padrão
                                         </button>
                                         <button type="button" class="btn btn-sm btn-outline-info" id="swing-update-pdf-text">
                                             <i class="fas fa-sync me-1"></i>Atualizar texto do PDF
@@ -185,8 +193,7 @@
 
                                 <!-- Client Name -->
                                 <div class="mb-3">
-                                    <label class="form-label">Cliente Específico (opcional)</label>
-                                    <input type="text" class="form-control" id="swing-client-name" placeholder="Nome do cliente">
+                                    <!-- Campo nome do cliente removido por solicitação do cliente -->
                                 </div>
 
                                 <!-- Actions -->
