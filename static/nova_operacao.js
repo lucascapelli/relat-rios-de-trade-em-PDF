@@ -4,34 +4,48 @@ class NovaOperacaoManager {
         this.app = app;
         this.currentMode = 'swing';
         this.dayTradeEntries = { C: [], V: [] }; // Compras e Vendas
-        this.portfolioAssets = [];
-        this.savedPortfolios = [];
-        this.selectedPortfolioId = null;
         this.init();
     }
 
     init() {
         console.log('NovaOperacaoManager init() called');
         this.setupModeSelector();
+        this.setupMainAssetShortcuts();
         this.setupSwingTrade();
         this.setupDayTrade();
-        this.setupPortfolio();
         this.setDefaultDates();
         console.log('NovaOperacaoManager init() completed');
     }
 
     setDefaultDates() {
         const today = new Date().toISOString().split('T')[0];
-        const elements = ['swing-trade-date', 'daytrade-date', 'portfolio-reference-date'];
+        const elements = ['swing-trade-date', 'daytrade-date'];
         elements.forEach(id => {
             const el = document.getElementById(id);
             if (el && !el.value) el.value = today;
         });
     }
 
+    setupMainAssetShortcuts() {
+        const buttons = document.querySelectorAll('.main-asset-btn');
+        buttons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const symbol = btn.getAttribute('data-symbol');
+                const swingField = document.getElementById('swing-symbol');
+                if (swingField) {
+                    swingField.value = symbol;
+                    this.updateSwingPreview();
+                }
+                const dtField = document.getElementById('dt-entry-symbol');
+                if (dtField) dtField.value = symbol;
+                this.showToast(`Ativo ${symbol} aplicado ao formulário atual`, 'info');
+            });
+        });
+    }
+
     setupModeSelector() {
         console.log('setupModeSelector() called');
-        ['mode-swing', 'mode-daytrade', 'mode-portfolio'].forEach(id => {
+        ['mode-swing', 'mode-daytrade'].forEach(id => {
             const element = document.getElementById(id);
             console.log(`Checking element ${id}:`, element);
             if (element) {
@@ -55,17 +69,10 @@ class NovaOperacaoManager {
         // Hide all containers
         document.querySelectorAll('.mode-container').forEach(el => el.style.display = 'none');
 
-        // Oculta Filtros Globais na aba Carteiras
-        const filtersRow = document.getElementById('global-filters-row');
-        if (filtersRow) {
-            filtersRow.style.display = (mode === 'portfolio') ? 'none' : '';
-        }
-
         // Show selected container
         const containers = {
             'swing': 'swing-trade-container',
-            'daytrade': 'daytrade-container',
-            'portfolio': 'portfolio-container'
+            'daytrade': 'daytrade-container'
         };
         const container = document.getElementById(containers[mode]);
         if (container) {
@@ -75,9 +82,6 @@ class NovaOperacaoManager {
             console.error('Container not found:', containers[mode]);
         }
 
-        if (mode === 'portfolio') {
-            this.fetchSavedPortfolios();
-        }
     }
 
     // ========== SWING TRADE ==========
@@ -94,7 +98,7 @@ class NovaOperacaoManager {
 
         // Atualizar pré-visualização ao alterar campos relevantes
         const previewFields = [
-            'swing-symbol', 'swing-entry', 'swing-entry-max',
+            'swing-symbol', 'swing-entry', 'swing-entry-min', 'swing-entry-max',
             'swing-target', 'swing-stop', 'swing-partial-exit', 'swing-partial'
         ];
         previewFields.forEach(id => {
@@ -119,6 +123,16 @@ class NovaOperacaoManager {
         document.getElementById('swing-update-pdf-text')?.addEventListener('click', () => {
             this.showToast('Funcionalidade de atualização de PDF será implementada', 'info');
         });
+
+        // Direção refletida na pré-visualização
+        const directionField = document.getElementById('swing-direction');
+        if (directionField) {
+            directionField.addEventListener('change', () => {
+                const dir = directionField.value === 'V' ? 'Venda' : 'Compra';
+                const dirEl = document.getElementById('preview-direction');
+                if (dirEl) dirEl.textContent = dir;
+            });
+        }
 
         // Atalhos de ativos por classe
         setTimeout(() => {
@@ -167,6 +181,7 @@ class NovaOperacaoManager {
         // Pega valores dos campos
         const ticker = document.getElementById('swing-symbol')?.value || '';
         const entry = document.getElementById('swing-entry')?.value || '';
+        const entryMin = document.getElementById('swing-entry-min')?.value || entry;
         const entryMaxPercent = document.getElementById('swing-entry-max')?.value || '';
         const entryMax = (() => {
             const e = parseFloat(entry);
@@ -174,14 +189,16 @@ class NovaOperacaoManager {
             if (e && p) return (e * (1 + p / 100)).toFixed(2);
             return '';
         })();
+        const direction = document.getElementById('swing-direction')?.value === 'V' ? 'Venda' : 'Compra';
         const partialExit = document.getElementById('swing-partial-exit')?.value || '';
         const partial = document.getElementById('swing-partial')?.value || '';
         const target = document.getElementById('swing-target')?.value || '';
         const stop = document.getElementById('swing-stop')?.value || '';
 
         document.getElementById('preview-ticker').textContent = ticker;
+        document.getElementById('preview-direction').textContent = direction;
         document.getElementById('preview-entry').textContent = entry;
-        document.getElementById('preview-entry-min').textContent = entry; // Campo removido, usar entrada
+        document.getElementById('preview-entry-min').textContent = entryMin;
         document.getElementById('preview-entry-max').textContent = entryMax;
         document.getElementById('preview-partial-exit').textContent = partialExit;
         document.getElementById('preview-partial').textContent = partial;
@@ -475,267 +492,6 @@ class NovaOperacaoManager {
         }
     }
 
-    // ========== PORTFOLIO ==========
-    setupPortfolio() {
-        const form = document.getElementById('portfolio-form');
-        if (!form) return;
-
-        document.getElementById('pf-load-assets')?.addEventListener('click', async () => {
-            await this.loadManipulatedAssets();
-        });
-
-        document.getElementById('pf-generate-pdf')?.addEventListener('click', async () => {
-            await this.generateManipulatedPortfolioPdf();
-        });
-
-        document.getElementById('pf-clear-assets')?.addEventListener('click', () => {
-            this.clearManipulatedAssets();
-        });
-
-        document.getElementById('pf-refresh-saved')?.addEventListener('click', async () => {
-            await this.fetchSavedPortfolios(true);
-        });
-
-        document.getElementById('pf-load-saved')?.addEventListener('click', () => {
-            this.loadSavedPortfolioFromSelect();
-        });
-
-        document.getElementById('pf-pdf-saved')?.addEventListener('click', async () => {
-            await this.generateSavedPortfolioPdf();
-        });
-
-        this.fetchSavedPortfolios();
-    }
-
-    getPortfolioFilters() {
-        const period = document.getElementById('portfolio-period')?.value || 'weekly';
-        const reference_date = document.getElementById('portfolio-reference-date')?.value || null;
-        const include_daytrade = document.getElementById('portfolio-include-daytrade')?.checked !== false;
-        const include_swing = document.getElementById('portfolio-include-swing')?.checked !== false;
-        return { period, reference_date, include_daytrade, include_swing };
-    }
-
-    async loadManipulatedAssets() {
-        const { period, reference_date, include_daytrade, include_swing } = this.getPortfolioFilters();
-
-        try {
-            const qs = new URLSearchParams({
-                period,
-                ...(reference_date ? { reference_date } : {}),
-                include_daytrade: include_daytrade ? '1' : '0',
-                include_swing: include_swing ? '1' : '0'
-            });
-
-            const response = await fetch(`/api/portfolio/manipulated?${qs.toString()}`);
-            const result = await response.json();
-
-            if (!response.ok) {
-                throw new Error(result?.error || 'Erro ao carregar ativos');
-            }
-
-            this.portfolioAssets = Array.isArray(result.assets) ? result.assets : [];
-            this.renderPortfolioAssets();
-
-            const rangeLabel = document.getElementById('pf-range-label');
-            if (rangeLabel) {
-                const start = result.start_date || '-';
-                const end = result.end_date || '-';
-                const count = this.portfolioAssets.length;
-                rangeLabel.textContent = `Período: ${start} até ${end} • Itens: ${count}`;
-            }
-
-            this.showToast('Ativos carregados', 'success');
-        } catch (error) {
-            console.error('Erro ao carregar ativos manipulados:', error);
-            this.showToast(`Erro ao carregar ativos: ${error.message}`, 'danger');
-        }
-    }
-
-    async fetchSavedPortfolios(showToast = false) {
-        try {
-            const response = await fetch('/api/portfolio/list');
-            const result = await response.json();
-
-            if (!response.ok) {
-                throw new Error(result?.error || 'Erro ao carregar carteiras salvas');
-            }
-
-            this.savedPortfolios = Array.isArray(result) ? result : [];
-            this.renderSavedPortfolioOptions();
-
-            if (showToast) {
-                this.showToast('Carteiras atualizadas', 'success');
-            }
-        } catch (error) {
-            console.error('Erro ao listar carteiras:', error);
-            this.showToast(`Erro ao listar carteiras: ${error.message}`, 'danger');
-        }
-    }
-
-    renderSavedPortfolioOptions() {
-        const select = document.getElementById('pf-saved-select');
-        if (!select) return;
-
-        const options = ['<option value="">Selecione uma carteira salva</option>'];
-        this.savedPortfolios.forEach((p) => {
-            const labelParts = [
-                `#${p.id}`,
-                p.portfolio_type || 'GERAL',
-                p.start_date && p.end_date ? `${p.start_date} -> ${p.end_date}` : (p.created_at || ''),
-                p.version ? `v${p.version}` : null,
-            ].filter(Boolean);
-            options.push(`<option value="${p.id}">${labelParts.join(' • ')}</option>`);
-        });
-
-        select.innerHTML = options.join('');
-        if (!this.savedPortfolios.find(p => p.id === this.selectedPortfolioId)) {
-            this.selectedPortfolioId = null;
-        }
-        if (this.selectedPortfolioId) {
-            select.value = String(this.selectedPortfolioId);
-        }
-    }
-
-    loadSavedPortfolioFromSelect() {
-        const select = document.getElementById('pf-saved-select');
-        if (!select) return;
-        const id = parseInt(select.value, 10);
-        if (!id) {
-            this.showToast('Escolha uma carteira salva para carregar', 'warning');
-            return;
-        }
-
-        const portfolio = this.savedPortfolios.find((p) => p.id === id);
-        if (!portfolio) {
-            this.showToast('Carteira não encontrada na lista', 'danger');
-            return;
-        }
-
-        this.applySavedPortfolio(portfolio);
-    }
-
-    applySavedPortfolio(portfolio) {
-        this.selectedPortfolioId = portfolio.id;
-        this.portfolioAssets = Array.isArray(portfolio.assets) ? portfolio.assets : [];
-        this.renderPortfolioAssets();
-
-        const rangeLabel = document.getElementById('pf-range-label');
-        if (rangeLabel) {
-            const start = portfolio.start_date || '-';
-            const end = portfolio.end_date || '-';
-            const count = this.portfolioAssets.length;
-            const version = portfolio.version ? ` • v${portfolio.version}` : '';
-            rangeLabel.textContent = `Carteira salva: ${start} até ${end} • Itens: ${count}${version}`;
-        }
-
-        const textarea = document.getElementById('portfolio-analytical-text');
-        if (textarea) {
-            textarea.value = portfolio.analytical_text || '';
-        }
-
-        const meta = document.getElementById('pf-saved-meta');
-        if (meta) {
-            meta.textContent = `${portfolio.portfolio_type || 'GERAL'} • Estado: ${portfolio.state || '-'} • Criada em ${portfolio.created_at || '-'}`;
-        }
-
-        this.showToast('Carteira salva carregada', 'success');
-    }
-
-    async generateSavedPortfolioPdf() {
-        if (!this.selectedPortfolioId) {
-            this.showToast('Selecione e carregue uma carteira salva antes de gerar PDF', 'warning');
-            return;
-        }
-
-        try {
-            const response = await fetch(`/api/portfolio/${this.selectedPortfolioId}/pdf`);
-            const result = await response.json();
-
-            if (!response.ok) {
-                throw new Error(result?.error || 'Erro ao gerar PDF da carteira salva');
-            }
-
-            if (result.url) {
-                window.open(result.url, '_blank');
-            }
-
-            this.showToast('PDF da carteira salva gerado', 'success');
-        } catch (error) {
-            console.error('Erro ao gerar PDF salvo:', error);
-            this.showToast(`Erro ao gerar PDF: ${error.message}`, 'danger');
-        }
-    }
-
-    clearManipulatedAssets() {
-        this.portfolioAssets = [];
-        this.renderPortfolioAssets();
-        const rangeLabel = document.getElementById('pf-range-label');
-        if (rangeLabel) rangeLabel.textContent = '';
-        this.showToast('Lista limpa', 'info');
-    }
-
-    renderPortfolioAssets() {
-        const tbody = document.getElementById('pf-assets-tbody');
-        if (!tbody) return;
-
-        const fmt = (value) => {
-            const num = Number(value);
-            return Number.isFinite(num) ? `R$ ${num.toFixed(2)}` : '-';
-        };
-
-        const originBadge = (source) => {
-            const s = String(source || '').toLowerCase();
-            if (s === 'daytrade') return '<span class="badge bg-success">Day Trade</span>';
-            if (s === 'swing') return '<span class="badge bg-primary">Swing</span>';
-            return '<span class="badge bg-secondary">-</span>';
-        };
-
-        tbody.innerHTML = this.portfolioAssets.map((asset) => `
-            <tr>
-                <td><strong>${asset.symbol}</strong></td>
-                <td>${fmt(asset.entry)}</td>
-                <td>${fmt(asset.entry_max)}</td>
-                <td>${fmt(asset.risk_zero)}</td>
-                <td>${fmt(asset.target)}</td>
-                <td>${fmt(asset.stop)}</td>
-                <td>${originBadge(asset.source)}</td>
-                <td class="text-muted small">${asset.trade_date || '-'}</td>
-            </tr>
-        `).join('');
-    }
-
-    async generateManipulatedPortfolioPdf() {
-        const { period, reference_date, include_daytrade, include_swing } = this.getPortfolioFilters();
-        const analytical_text = document.getElementById('portfolio-analytical-text')?.value || '';
-
-        try {
-            const response = await fetch('/api/portfolio/manipulated/pdf', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    period,
-                    reference_date,
-                    include_daytrade,
-                    include_swing,
-                    analytical_text
-                })
-            });
-
-            const result = await response.json();
-            if (!response.ok) {
-                throw new Error(result?.error || 'Erro ao gerar PDF');
-            }
-
-            if (result.url) {
-                window.open(result.url, '_blank');
-            }
-            this.showToast(`PDF gerado (${result.count || 0} itens)`, 'success');
-        } catch (error) {
-            console.error('Erro ao gerar PDF da carteira derivada:', error);
-            this.showToast(`Erro ao gerar PDF: ${error.message}`, 'danger');
-        }
-    }
-
     // ========== UTILITIES ==========
     showToast(message, type = 'info') {
         if (this.app && typeof this.app.showToast === 'function') {
@@ -748,8 +504,7 @@ class NovaOperacaoManager {
     generateAIText(mode) {
         // Placeholder aguardando texto padrão do Gustavo
         const textoPadrao = 'Aguardando texto padrão do Gustavo';
-        const textareaId = mode === 'swing' ? 'swing-analytical-text' : 'portfolio-analytical-text';
-        const textarea = document.getElementById(textareaId);
+        const textarea = document.getElementById('swing-analytical-text');
         if (textarea) {
             textarea.value = textoPadrao;
             this.showToast('Texto gerado! Você pode editá-lo livremente', 'success');

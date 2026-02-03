@@ -116,43 +116,43 @@ class Database:
             )
             """
             )
-            
-            # Portfolios table
+            con.commit()
+            self._ensure_new_columns(cur)
+
+            # Nova carteira semanal (v2)
             cur.execute(
                 """
-            CREATE TABLE IF NOT EXISTS portfolios (
+            CREATE TABLE IF NOT EXISTS weekly_portfolios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                portfolio_type TEXT NOT NULL,
-                state TEXT NOT NULL,
-                start_date TEXT,
-                end_date TEXT,
-                analytical_text TEXT,
-                version INTEGER DEFAULT 1,
-                pdf_path TEXT,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
             """
             )
-            
-            # Portfolio Assets table
+
             cur.execute(
                 """
-            CREATE TABLE IF NOT EXISTS portfolio_assets (
+            CREATE TABLE IF NOT EXISTS weekly_portfolio_assets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 portfolio_id INTEGER NOT NULL,
                 symbol TEXT NOT NULL,
                 entry REAL NOT NULL,
-                entry_max REAL NOT NULL,
-                risk_zero REAL NOT NULL,
-                target REAL NOT NULL,
-                stop REAL NOT NULL,
-                FOREIGN KEY (portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE
+                objective REAL NOT NULL,
+                stop_loss REAL NOT NULL,
+                entry_maxima REAL,
+                entry_minima REAL,
+                ultimo_preco REAL,
+                percentual REAL,
+                retorno_pct REAL,
+                risco_pct REAL,
+                risco_zero_preco REAL,
+                risco_zero_pct REAL,
+                FOREIGN KEY (portfolio_id) REFERENCES weekly_portfolios(id) ON DELETE CASCADE
             )
             """
             )
-            
-            con.commit()
-            self._ensure_new_columns(cur)
+
             con.commit()
 
     def _ensure_new_columns(self, cursor: sqlite3.Cursor) -> None:
@@ -563,94 +563,104 @@ class Database:
 
         return results
 
-    # ========== PORTFOLIO METHODS ==========
-    def insert_portfolio(self, portfolio: Dict[str, Any], assets: List[Dict[str, Any]]) -> int:
-        """Insert a portfolio with assets."""
+    # ========== WEEKLY PORTFOLIO V2 (nova carteira) ========== 
+    def insert_weekly_portfolio(self, portfolio: Dict[str, Any], assets: List[Dict[str, Any]]) -> int:
+        """Insert a new weekly portfolio (v2) with computed assets."""
         with self._connect() as con:
             cur = con.cursor()
             cur.execute(
                 """
-                INSERT INTO portfolios (
-                    portfolio_type, state, start_date, end_date,
-                    analytical_text, version, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO weekly_portfolios (start_date, end_date, created_at)
+                VALUES (?, ?, ?)
                 """,
                 (
-                    portfolio["portfolio_type"], portfolio["state"],
-                    portfolio.get("start_date"), portfolio.get("end_date"),
-                    portfolio.get("analytical_text", ""),
-                    portfolio.get("version", 1),
-                    portfolio.get("created_at")
-                )
+                    portfolio["start_date"],
+                    portfolio["end_date"],
+                    portfolio["created_at"],
+                ),
             )
             portfolio_id = cur.lastrowid
-            
+
             for asset in assets:
                 cur.execute(
                     """
-                    INSERT INTO portfolio_assets (
-                        portfolio_id, symbol, entry, entry_max,
-                        risk_zero, target, stop
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO weekly_portfolio_assets (
+                        portfolio_id, symbol, entry, objective, stop_loss,
+                        entry_maxima, entry_minima, ultimo_preco,
+                        percentual, retorno_pct, risco_pct,
+                        risco_zero_preco, risco_zero_pct
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        portfolio_id, asset["symbol"], asset["entry"],
-                        asset["entry_max"], asset["risk_zero"],
-                        asset["target"], asset["stop"]
-                    )
+                        portfolio_id,
+                        asset["symbol"],
+                        asset["entry"],
+                        asset["objective"],
+                        asset["stop_loss"],
+                        asset.get("entry_maxima"),
+                        asset.get("entry_minima"),
+                        asset.get("ultimo_preco"),
+                        asset.get("percentual"),
+                        asset.get("retorno_pct"),
+                        asset.get("risco_pct"),
+                        asset.get("risco_zero_preco"),
+                        asset.get("risco_zero_pct"),
+                    ),
                 )
-            
+
             con.commit()
             return portfolio_id
 
-    def update_portfolio_pdf(self, portfolio_id: int, pdf_path: str) -> None:
-        """Update PDF path for a portfolio."""
+    def list_weekly_portfolios(self, limit: Optional[int] = 20) -> List[Dict[str, Any]]:
+        """List saved weekly portfolios with their assets."""
         with self._connect() as con:
             cur = con.cursor()
-            cur.execute("UPDATE portfolios SET pdf_path = ? WHERE id = ?", (pdf_path, portfolio_id))
-            con.commit()
-
-    def get_portfolios(self, limit: Optional[int] = 50) -> List[Dict[str, Any]]:
-        """Get portfolios with assets."""
-        with self._connect() as con:
-            cur = con.cursor()
-            base_query = """
-                SELECT id, portfolio_type, state, start_date, end_date,
-                       analytical_text, version, pdf_path, created_at
-                FROM portfolios
-                ORDER BY id DESC
-            """
+            base_query = "SELECT id, start_date, end_date, created_at FROM weekly_portfolios ORDER BY id DESC"
             if limit is None:
                 cur.execute(base_query)
             else:
                 cur.execute(base_query + " LIMIT ?", (int(limit),))
-            portfolios = []
+
+            portfolios: List[Dict[str, Any]] = []
             for row in cur.fetchall():
-                portfolio_id = row[0]
+                pid = row[0]
                 cur.execute(
                     """
-                    SELECT symbol, entry, entry_max, risk_zero, target, stop
-                    FROM portfolio_assets
+                    SELECT symbol, entry, objective, stop_loss, entry_maxima, entry_minima,
+                           ultimo_preco, percentual, retorno_pct, risco_pct,
+                           risco_zero_preco, risco_zero_pct
+                    FROM weekly_portfolio_assets
                     WHERE portfolio_id = ?
+                    ORDER BY id ASC
                     """,
-                    (portfolio_id,)
+                    (pid,),
                 )
                 assets = [
                     {
-                        "symbol": a[0], "entry": a[1], "entry_max": a[2],
-                        "risk_zero": a[3], "target": a[4], "stop": a[5]
+                        "symbol": a[0],
+                        "entry": a[1],
+                        "objective": a[2],
+                        "stop_loss": a[3],
+                        "entry_maxima": a[4],
+                        "entry_minima": a[5],
+                        "ultimo_preco": a[6],
+                        "percentual": a[7],
+                        "retorno_pct": a[8],
+                        "risco_pct": a[9],
+                        "risco_zero_preco": a[10],
+                        "risco_zero_pct": a[11],
                     }
                     for a in cur.fetchall()
                 ]
-                portfolios.append({
-                    "id": portfolio_id, "portfolio_type": row[1],
-                    "state": row[2], "start_date": row[3], "end_date": row[4],
-                    "analytical_text": row[5], "version": row[6],
-                    "pdf_path": row[7], "created_at": row[8],
-                    "assets": assets
-                })
-            return portfolios
 
-    def get_portfolio(self, portfolio_id: int) -> Optional[Dict[str, Any]]:
-        portfolios = self.get_portfolios(limit=None)
-        return next((p for p in portfolios if p.get("id") == portfolio_id), None)
+                portfolios.append(
+                    {
+                        "id": pid,
+                        "start_date": row[1],
+                        "end_date": row[2],
+                        "created_at": row[3],
+                        "assets": assets,
+                    }
+                )
+
+            return portfolios

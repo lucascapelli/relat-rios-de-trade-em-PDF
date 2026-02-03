@@ -3,16 +3,17 @@ from __future__ import annotations
 
 import json
 import os
-import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import plotly
-from flask import Blueprint, jsonify, render_template, request, send_from_directory, redirect
+from flask import Blueprint, jsonify, redirect, render_template, request, send_from_directory
 from ..charts import ChartGenerator, format_timeframe_label
 from ..config import PLACEHOLDER_IMAGE_DATA_URL, REPORTS_DIR
 from ..indicators import TechnicalNarrative
 from ..models import Operation, asdict
+from ..portfolio import MAX_ASSETS, build_weekly_portfolio
 from ..services import Services
 from ..utils import logger
 from app.auth import login_required
@@ -54,7 +55,6 @@ def _build_chart_components(df: pd.DataFrame, limit: int = 100) -> Tuple[List[Di
             volume_value = 0
 
         # Emit time in a JS-friendly ISO format (seconds precision).
-        # Some browsers/Plotly paths can behave badly with 6-digit microseconds.
         try:
             time_ts = pd.Timestamp(row["time"]).to_pydatetime().replace(microsecond=0)
             iso_time = time_ts.isoformat()
@@ -113,50 +113,17 @@ def register_api_routes(app, services: Services) -> None:
         feed = feedparser.parse(FEED_URL)
         news = []
         for entry in feed.entries[:5]:
-            news.append({
-                "title": entry.title,
-                "link": entry.link,
-                "published": entry.get("published", "")
-            })
+            news.append({"title": entry.title, "link": entry.link, "published": entry.get("published", "")})
         news_cache.set("market_news", news)
         return jsonify(news)
 
-    def _parse_iso_date(value: Optional[str]):
-        from datetime import datetime
-
-        if not value:
+    def _parse_date(raw: Optional[str]) -> Optional[pd.Timestamp]:
+        if not raw:
             return None
         try:
-            return datetime.strptime(str(value), "%Y-%m-%d").date()
+            return pd.to_datetime(str(raw), errors="coerce")
         except Exception:
             return None
-
-    def _get_period_range(period_raw: str, reference_date_raw: Optional[str]):
-        from datetime import date, timedelta
-        import calendar
-
-        period_norm = (period_raw or "").strip().lower()
-        if period_norm in {"semanal", "semana", "weekly", "week", "w"}:
-            period_norm = "weekly"
-        elif period_norm in {"mensal", "mes", "mês", "monthly", "month", "m"}:
-            period_norm = "monthly"
-        elif period_norm in {"geral", "all", "range", "custom"}:
-            period_norm = "range"
-
-        ref = _parse_iso_date(reference_date_raw) or date.today()
-
-        if period_norm == "weekly":
-            start = ref - timedelta(days=ref.weekday())
-            end = start + timedelta(days=6)
-            return period_norm, start, end
-
-        if period_norm == "monthly":
-            start = ref.replace(day=1)
-            last_day = calendar.monthrange(ref.year, ref.month)[1]
-            end = ref.replace(day=last_day)
-            return period_norm, start, end
-
-        return "range", ref, ref
 
     @bp.route("/")
     @login_required
@@ -335,7 +302,6 @@ def register_api_routes(app, services: Services) -> None:
                     operation.status = "STOP ATINGIDO"
 
             preferred_timeframes: List[str] = []
-            # PDFs: manter apenas visão tática (15m), confirmação (1h) e contexto (1d)
             base_timeframes = ["15m", "1h", "1d"]
             if operation.timeframe and operation.timeframe not in base_timeframes:
                 preferred_timeframes.append(operation.timeframe)
@@ -471,11 +437,7 @@ def register_api_routes(app, services: Services) -> None:
         for symbol, name in finance_data.tickers.items():
             if query.upper() in symbol or query.upper() in name.upper():
                 results.append(
-                    {
-                        "symbol": symbol.replace(".SA", ""),
-                        "name": name,
-                        "type": "Ação" if ".SA" in symbol else "ETF",
-                    }
+                    {"symbol": symbol.replace(".SA", ""), "name": name, "type": "Ação" if ".SA" in symbol else "ETF"}
                 )
 
         return jsonify(results[:10])
@@ -485,7 +447,6 @@ def register_api_routes(app, services: Services) -> None:
         try:
             operations = database.get_operations(50)
 
-            # Inclui swing trades no histórico
             swing_trades = database.get_swing_trades(limit=100)
             swing_ops: List[Dict[str, Any]] = []
             for swing in swing_trades:
@@ -505,18 +466,19 @@ def register_api_routes(app, services: Services) -> None:
                         observacoes=str(swing.get("analytical_text") or ""),
                     )
                     op_dict = asdict(op_model)
-                    op_dict.update({
-                        "id": f"swing-{swing.get('id')}",
-                        "pdf_path": swing.get("pdf_path"),
-                        "created_at": swing.get("created_at") or swing.get("trade_date"),
-                        "status": swing.get("status") or "ABERTA",
-                        "source": "swing_trade",
-                    })
+                    op_dict.update(
+                        {
+                            "id": f"swing-{swing.get('id')}",
+                            "pdf_path": swing.get("pdf_path"),
+                            "created_at": swing.get("created_at") or swing.get("trade_date"),
+                            "status": swing.get("status") or "ABERTA",
+                            "source": "swing_trade",
+                        }
+                    )
                     swing_ops.append(op_dict)
                 except Exception as exc:
                     logger.warning("Falha ao mapear swing trade para histórico: %s", exc, exc_info=True)
 
-            # Inclui day trade sessions no histórico
             daytrade_sessions = database.get_day_trade_sessions(limit=100)
             daytrade_ops: List[Dict[str, Any]] = []
             for session in daytrade_sessions:
@@ -533,24 +495,25 @@ def register_api_routes(app, services: Services) -> None:
                         entrada=float(entry.get("entry") or 0),
                         stop=float(entry.get("stop") or 0),
                         alvo=float(entry.get("target") or 0),
-                        quantidade=1,  # Day trade não tem quantidade por entrada
+                        quantidade=1,
                         timeframe=timeframe,
                         entrada_min=None,
                         entrada_max=None,
                         observacoes="DAY TRADE",
                     )
                     op_dict = asdict(op_model)
-                    op_dict.update({
-                        "id": f"daytrade-{session_id}-{idx}",
-                        "pdf_path": session.get("pdf_path"),
-                        "created_at": created_at,
-                        "status": "ABERTA",
-                        "source": "daytrade",
-                        "session_id": session_id,
-                    })
+                    op_dict.update(
+                        {
+                            "id": f"daytrade-{session_id}-{idx}",
+                            "pdf_path": session.get("pdf_path"),
+                            "created_at": created_at,
+                            "status": "ABERTA",
+                            "source": "daytrade",
+                            "session_id": session_id,
+                        }
+                    )
                     daytrade_ops.append(op_dict)
 
-            # Marca origem para diferenciar e faz merge.
             for op in operations:
                 op.setdefault("source", "operation")
 
@@ -571,16 +534,14 @@ def register_api_routes(app, services: Services) -> None:
 
     @bp.route("/reports/<path:filename>")
     def serve_report(filename: str):
-        # Tenta servir localmente primeiro (para dev local)
         try:
             return send_from_directory(str(REPORTS_DIR), filename)
         except Exception:
-            # Se não encontrar local, tenta gerar link do S3/B2
             from ..storage import get_presigned_url
+
             s3_url = get_presigned_url(filename)
             if s3_url:
                 return redirect(s3_url)
-            # Se falhar tudo, 404
             return jsonify({"error": "Report not found"}), 404
 
     # ========== SWING TRADE ROUTES ==========
@@ -589,7 +550,6 @@ def register_api_routes(app, services: Services) -> None:
     def api_swing_trade():
         try:
             data = request.get_json() or {}
-            from datetime import datetime
             from ..config import BR_TZ
 
             swing_data = {
@@ -636,7 +596,6 @@ def register_api_routes(app, services: Services) -> None:
     def api_day_trade():
         try:
             data = request.get_json() or {}
-            from datetime import datetime
             from ..config import BR_TZ
 
             session_data = {
@@ -664,161 +623,71 @@ def register_api_routes(app, services: Services) -> None:
             logger.error(f"Erro ao listar day trades: {exc}")
             return jsonify([])
 
-    # ========== PORTFOLIO ROUTES ==========
-    @bp.route("/api/portfolio", methods=["POST"])
+    # ========== PORTFOLIO V2 ROUTES ==========
+    @bp.route("/api/portfolio/v2/build", methods=["POST"])
     @login_required
-    def api_portfolio():
+    def api_portfolio_build_v2():
         try:
-            data = request.get_json() or {}
-            from datetime import datetime
-            from ..config import BR_TZ
-            
-            portfolio_data = {
-                "portfolio_type": data.get("portfolio_type", "GERAL"),
-                "state": data.get("state", "CONSTRUIR"),
-                "start_date": data.get("start_date"),
-                "end_date": data.get("end_date"),
-                "analytical_text": data.get("analytical_text", ""),
-                "version": data.get("version", 1),
-                "created_at": datetime.now(BR_TZ).isoformat()
-            }
-            
-            assets = data.get("assets", [])
-            
-            portfolio_id = database.insert_portfolio(portfolio_data, assets)
-            
-            return jsonify({
-                "id": portfolio_id,
-                "status": "success",
-                "message": "Carteira registrada com sucesso"
-            })
-        except Exception as exc:
-            logger.error(f"Erro ao registrar carteira: {exc}")
-            return jsonify({"error": str(exc)}), 500
+            payload = request.get_json() or {}
+            raw_assets = payload.get("assets") or []
+            start_date = _parse_date(payload.get("start_date"))
+            end_date = _parse_date(payload.get("end_date"))
 
-    @bp.route("/api/portfolio/list", methods=["GET"])
-    def api_portfolio_list():
+            if len(raw_assets) > MAX_ASSETS:
+                return jsonify({"error": f"Máximo de {MAX_ASSETS} ativos"}), 400
+
+            last_prices: Dict[str, float] = {}
+            for item in raw_assets:
+                symbol = str(item.get("symbol") or "").upper().strip()
+                if not symbol:
+                    continue
+                try:
+                    info = finance_data.get_ticker_info(symbol)
+                    if info and getattr(info, "price", None) is not None:
+                        last_prices[symbol] = float(info.price)
+                except Exception:
+                    continue
+
+            portfolio = build_weekly_portfolio(
+                raw_assets,
+                start_date=start_date.date() if start_date is not None else None,
+                end_date=end_date.date() if end_date is not None else None,
+                last_prices=last_prices,
+            )
+
+            now_str = datetime.utcnow().isoformat()
+            portfolio_id = database.insert_weekly_portfolio(
+                {
+                    "start_date": portfolio.start_date.isoformat(),
+                    "end_date": portfolio.end_date.isoformat(),
+                    "created_at": now_str,
+                },
+                [a.to_dict() for a in portfolio.assets],
+            )
+
+            return jsonify({"id": portfolio_id, "status": "success", "portfolio": portfolio.to_dict()})
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            logger.error(f"Erro ao construir carteira v2: {exc}")
+            return jsonify({"error": "Falha ao construir carteira"}), 500
+
+    @bp.route("/api/portfolio/v2/list", methods=["GET"])
+    def api_portfolio_list_v2():
         try:
-            portfolios = database.get_portfolios(limit=100)
+            limit = request.args.get("limit", default=20, type=int)
+            portfolios = database.list_weekly_portfolios(limit=limit)
             return jsonify(portfolios)
         except Exception as exc:
-            logger.error(f"Erro ao listar carteiras: {exc}")
+            logger.error(f"Erro ao listar carteiras v2: {exc}")
             return jsonify([])
-
-    @bp.route("/api/portfolio/manipulated", methods=["GET"])
-    def api_portfolio_manipulated_assets():
-        """List assets manipulated in Day Trade and Swing Trade for a period."""
-        try:
-            period = request.args.get("period", default="weekly", type=str)
-            reference_date = request.args.get("reference_date", default=None, type=str)
-            include_swing = request.args.get("include_swing", default="1", type=str) != "0"
-            include_daytrade = request.args.get("include_daytrade", default="1", type=str) != "0"
-
-            period_norm, start_d, end_d = _get_period_range(period, reference_date)
-            start_date = start_d.strftime("%Y-%m-%d")
-            end_date = end_d.strftime("%Y-%m-%d")
-
-            assets = database.get_manipulated_assets(
-                start_date=start_date,
-                end_date=end_date,
-                include_swing=include_swing,
-                include_daytrade=include_daytrade,
-            )
-
-            return jsonify(
-                {
-                    "period": period_norm,
-                    "reference_date": reference_date,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "assets": assets,
-                }
-            )
-        except Exception as exc:
-            logger.error(f"Erro ao listar ativos manipulados: {exc}")
-            return jsonify({"error": str(exc)}), 500
-
-    @bp.route("/api/portfolio/manipulated/pdf", methods=["POST"])
-    def api_portfolio_manipulated_pdf():
-        """Generate a portfolio PDF based on manipulated assets (no DB persistence)."""
-        try:
-            data = request.get_json() or {}
-            period = str(data.get("period") or "weekly")
-            reference_date = data.get("reference_date")
-            include_swing = bool(data.get("include_swing", True))
-            include_daytrade = bool(data.get("include_daytrade", True))
-            analytical_text = str(data.get("analytical_text") or "")
-
-            period_norm, start_d, end_d = _get_period_range(period, reference_date)
-            start_date = start_d.strftime("%Y-%m-%d")
-            end_date = end_d.strftime("%Y-%m-%d")
-
-            assets = database.get_manipulated_assets(
-                start_date=start_date,
-                end_date=end_date,
-                include_swing=include_swing,
-                include_daytrade=include_daytrade,
-            )
-
-            portfolio_payload = {
-                "portfolio_type": "SEMANAL" if period_norm == "weekly" else "MENSAL" if period_norm == "monthly" else "GERAL",
-                "state": "DERIVADA",
-                "start_date": start_date,
-                "end_date": end_date,
-                "version": 1,
-                "analytical_text": analytical_text,
-                "assets": [
-                    {
-                        "symbol": a.get("symbol"),
-                        "entry": a.get("entry"),
-                        "entry_max": a.get("entry_max"),
-                        "risk_zero": a.get("risk_zero"),
-                        "target": a.get("target"),
-                        "stop": a.get("stop"),
-                    }
-                    for a in assets
-                ],
-            }
-
-            pdf_path = report_generator.generate_portfolio_pdf(portfolio_payload)
-            
-            # --- S3 Upload Integration ---
-            from ..storage import upload_to_s3
-            s3_url = upload_to_s3(pdf_path)
-            
-            final_url = f"/reports/{os.path.basename(pdf_path)}"
-            if s3_url:
-                final_url = s3_url
-                # Em ambiente efêmero, podemos remover o arquivo local
-                try:
-                    os.remove(pdf_path)
-                except:
-                    pass
-            # -----------------------------
-
-            return jsonify(
-                {
-                    "status": "success",
-                    "filename": os.path.basename(pdf_path),
-                    "url": final_url,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "count": len(assets),
-                }
-            )
-        except Exception as exc:
-            logger.error(f"Erro ao gerar PDF de carteira derivada: {exc}")
-            return jsonify({"error": str(exc)}), 500
 
     @bp.route("/api/swing-trade/<int:trade_id>/pdf", methods=["GET"])
     def api_swing_trade_pdf(trade_id):
-        """Generate PDF for a specific swing trade"""
         try:
             trade = database.get_swing_trade(int(trade_id))
             if not trade:
                 return jsonify({"error": "Trade não encontrado"}), 404
-
-            from ..models import Operation
 
             direction = str(trade.get("direction") or "LONG").upper()
             tipo = "COMPRA" if direction == "LONG" else "VENDA"
@@ -835,7 +704,6 @@ def register_api_routes(app, services: Services) -> None:
                 observacoes=str(trade.get("analytical_text") or ""),
             )
 
-            # Try to enrich with current price (non-fatal)
             try:
                 info = finance_data.get_ticker_info(op.symbol)
                 if info and getattr(info, "price", None):
@@ -856,20 +724,15 @@ def register_api_routes(app, services: Services) -> None:
                 }
                 return mapping.get(raw, raw)
 
-            # Para swing trade, os timeframes principais são major (principal) e minor (entrada)
-            # A ordem correta é: major -> minor -> outros complementares
             base_tfs = ["1d", "1h", "15m"]
             major = _normalize_tf(trade.get("timeframe_major"))
             minor = _normalize_tf(trade.get("timeframe_minor"))
-            
+
             tfs: List[str] = []
-            # Primeiro adiciona o major (timeframe principal)
             if major and major not in tfs:
                 tfs.append(major)
-            # Depois o minor (timeframe de entrada)
             if minor and minor not in tfs:
                 tfs.append(minor)
-            # Por fim, os complementares
             for tf in base_tfs:
                 if tf and tf not in tfs:
                     tfs.append(tf)
@@ -913,37 +776,29 @@ def register_api_routes(app, services: Services) -> None:
                     logger.warning(f"Falha ao gerar chart para swing trade {op.symbol} {tf}: {exc}")
 
             pdf_path = report_generator.generate_pdf_report(op, chart_images)
-            
-            # --- S3 Upload Integration ---
+
             from ..storage import upload_to_s3
+
             s3_url = upload_to_s3(pdf_path)
-            
+
             final_url = f"/reports/{os.path.basename(pdf_path)}"
             if s3_url:
                 final_url = s3_url
                 try:
                     os.remove(pdf_path)
-                except:
+                except Exception:
                     pass
-            # -----------------------------
-            
+
             database.update_swing_trade_pdf(int(trade_id), final_url)
 
-            return jsonify(
-                {
-                    "status": "success",
-                    "filename": os.path.basename(pdf_path),
-                    "url": final_url,
-                }
-            )
-            
+            return jsonify({"status": "success", "filename": os.path.basename(pdf_path), "url": final_url})
+
         except Exception as exc:
             logger.error(f"Erro ao gerar PDF de swing trade: {exc}")
             return jsonify({"error": str(exc)}), 500
 
     @bp.route("/api/day-trade/<int:session_id>/pdf", methods=["GET"])
     def api_day_trade_pdf(session_id):
-        """Generate PDF for a specific day trade session with charts per símbolo/timeframe."""
         try:
             session = database.get_day_trade_session(int(session_id))
 
@@ -993,78 +848,31 @@ def register_api_routes(app, services: Services) -> None:
                             }
                         )
                     except Exception as exc_inner:
-                        logger.warning(
-                            "Falha ao gerar chart para day trade %s %s: %s",
-                            symbol,
-                            tf,
-                            exc_inner,
-                        )
+                        logger.warning("Falha ao gerar chart para day trade %s %s: %s", symbol, tf, exc_inner)
 
             pdf_path = report_generator.generate_day_trade_pdf(session, charts_payload)
-            
-            # --- S3 Upload Integration ---
+
             from ..storage import upload_to_s3
+
             s3_url = upload_to_s3(pdf_path)
-            
+
             final_url = f"/reports/{os.path.basename(pdf_path)}"
             if s3_url:
                 final_url = s3_url
                 try:
                     os.remove(pdf_path)
-                except:
+                except Exception:
                     pass
-            # -----------------------------
-            
+
             database.update_day_trade_session_pdf(int(session_id), final_url)
 
-            return jsonify(
-                {
-                    "status": "success",
-                    "filename": os.path.basename(pdf_path),
-                    "url": final_url,
-                }
-            )
+            return jsonify({"status": "success", "filename": os.path.basename(pdf_path), "url": final_url})
 
         except Exception as exc:
             logger.error(f"Erro ao gerar PDF de day trade: {exc}")
             return jsonify({"error": str(exc)}), 500
 
-    @bp.route("/api/portfolio/<int:portfolio_id>/pdf", methods=["GET"])
-    @login_required
-    def api_portfolio_pdf(portfolio_id):
-        try:
-            portfolio = database.get_portfolio(int(portfolio_id))
-
-            
-            if not portfolio:
-                return jsonify({"error": "Carteira não encontrada"}), 404
-
-            pdf_path = report_generator.generate_portfolio_pdf(portfolio)
-            
-            # --- S3 Upload Integration ---
-            from ..storage import upload_to_s3
-            s3_url = upload_to_s3(pdf_path)
-            
-            final_url = f"/reports/{os.path.basename(pdf_path)}"
-            if s3_url:
-                final_url = s3_url
-                # No need to remove here as upload_to_s3 already does it if successful, 
-                # but safeguard check is fine.
-            # -----------------------------
-
-            database.update_portfolio_pdf(int(portfolio_id), final_url)
-
-            return jsonify(
-                {
-                    "status": "success",
-                    "filename": os.path.basename(pdf_path),
-                    "url": final_url,
-                }
-            )
-            
-        except Exception as exc:
-            logger.error(f"Erro ao gerar PDF de carteira: {exc}")
-            return jsonify({"error": str(exc)}), 500
-
     app.register_blueprint(bp)
+
+
 

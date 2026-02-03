@@ -48,6 +48,7 @@ class TradingApp {
         this.socketSubscriptions = new Set();
         this.operations = [];
         this.lastDataSource = null;
+        this.portfolioUI = null;
         
         this.init();
     }
@@ -65,11 +66,22 @@ class TradingApp {
         this.updateScaleButtons();
         this.loadChart(this.currentSymbol, this.currentInterval);
         this.loadOperationsHistory();
+
+        // Init portfolio UI (Carteiras)
+        this.initPortfolioUI();
         
         // Show welcome message
         setTimeout(() => {
             this.showToast('Sistema de trading carregado com sucesso!', 'success');
         }, 1000);
+    }
+
+    initPortfolioUI() {
+        try {
+            this.portfolioUI = new PortfolioUI({ showToast: this.showToast.bind(this) });
+        } catch (err) {
+            console.error('Erro ao inicializar carteiras:', err);
+        }
     }
     
     inferTickSize(symbol) {
@@ -1886,4 +1898,375 @@ function loadMarketNews() {
             console.error('Erro ao carregar notícias:', error);
             container.innerHTML = '<p class="text-muted">Erro ao carregar notícias.</p>';
         });
+}
+
+// Lightweight UI manager for Carteiras Semanais (v2)
+class PortfolioUI {
+    constructor({ showToast }) {
+        this.maxAssets = 5;
+        this.assets = [];
+        this.showToast = showToast || ((msg, type) => alert(msg));
+        this.tbody = document.getElementById('pf-asset-tbody');
+        this.countBadge = document.getElementById('pf-asset-count');
+        this.historyTbody = document.getElementById('pf-history-tbody');
+        this.lastContainer = document.getElementById('pf-last-container');
+        this.startInput = document.getElementById('pf-start-date');
+        this.endInput = document.getElementById('pf-end-date');
+        this.buildBtn = document.getElementById('pf-build-btn');
+        this.addBtn = document.getElementById('pf-add-asset');
+        this.refreshBtn = document.getElementById('pf-refresh-history');
+        this._wireEvents();
+        this._setDefaultDates();
+        this._addAssetRow();
+        this.loadHistory();
+    }
+
+    _wireEvents() {
+        this.addBtn?.addEventListener('click', () => this._addAssetRow());
+        this.buildBtn?.addEventListener('click', () => this.buildPortfolio());
+        this.refreshBtn?.addEventListener('click', () => this.loadHistory());
+    }
+
+    _setDefaultDates() {
+        const today = new Date();
+        const day = today.getDay();
+        const mondayOffset = (day === 0 ? -6 : 1 - day);
+        const monday = new Date(today);
+        monday.setDate(today.getDate() + mondayOffset);
+        const friday = new Date(monday);
+        friday.setDate(monday.getDate() + 4);
+        const fmt = (d) => d.toISOString().split('T')[0];
+        if (this.startInput && !this.startInput.value) this.startInput.value = fmt(monday);
+        if (this.endInput && !this.endInput.value) this.endInput.value = fmt(friday);
+    }
+
+    _addAssetRow() {
+        if (this.assets.length >= this.maxAssets) {
+            this.showToast(`Máximo de ${this.maxAssets} ativos`, 'warning');
+            return;
+        }
+        this.assets.push({ symbol: '', entrada: '', objetivo: '', stop: '', ultimo: '', entrada_maxima: '', entrada_minima: '' });
+        this._render();
+    }
+
+    _removeAsset(index) {
+        this.assets.splice(index, 1);
+        this._render();
+    }
+
+    _render() {
+        if (!this.tbody) return;
+        const total = Math.max(this.assets.length, 1);
+        this.tbody.innerHTML = this.assets
+            .map((asset, idx) => {
+                const lastVal = this.formatCurrency(asset.ultimo);
+                const percentual = this.formatPercent(this._calcPercentual(asset));
+                const retorno = this.formatPercent(this._calcRetorno(asset));
+                const risco = this.formatPercent(this._calcRisco(asset));
+                const riscoZero = this.formatCurrency(this._calcRiscoZero(asset).preco);
+                const entradaMaxVal = this._toNumber(asset.entrada_maxima);
+                const entradaMinVal = this._toNumber(asset.entrada_minima);
+                const entradaMax = Number.isFinite(entradaMaxVal) ? this.formatCurrency(entradaMaxVal) : '';
+                const entradaMin = Number.isFinite(entradaMinVal) ? this.formatCurrency(entradaMinVal) : '';
+                const maxPct = this._formatPctFromEntry(asset.entrada, entradaMaxVal);
+                const minPct = this._formatPctFromEntry(asset.entrada, entradaMinVal);
+                return `
+                <tr data-idx="${idx}">
+                    <td><input class="form-control form-control-sm pf-symbol" value="${asset.symbol || ''}" placeholder="Ticker"></td>
+                    <td><input type="number" step="0.01" class="form-control form-control-sm pf-entry" value="${asset.entrada || ''}"></td>
+                    <td><input type="number" step="0.01" class="form-control form-control-sm pf-objetivo" value="${asset.objetivo || ''}"></td>
+                    <td><input type="number" step="0.01" class="form-control form-control-sm pf-stop" value="${asset.stop || ''}"></td>
+                    <td><input class="form-control form-control-sm pf-ultimo" value="${lastVal}" placeholder="auto" readonly></td>
+                    <td><input class="form-control form-control-sm pf-percent" value="${percentual}" readonly></td>
+                    <td><input class="form-control form-control-sm pf-retorno" value="${retorno}" readonly></td>
+                    <td><input class="form-control form-control-sm pf-risco" value="${risco}" readonly></td>
+                    <td><input class="form-control form-control-sm pf-rz-preco" value="${riscoZero}" readonly></td>
+                    <td><input type="text" inputmode="decimal" class="form-control form-control-sm pf-entrada-max" value="${entradaMax}" placeholder="R$ 0,00"></td>
+                    <td><input class="form-control form-control-sm pf-max-pct" value="${maxPct}" placeholder="auto" readonly></td>
+                    <td><input type="text" inputmode="decimal" class="form-control form-control-sm pf-entrada-min" value="${entradaMin}" placeholder="R$ 0,00"></td>
+                    <td><input class="form-control form-control-sm pf-min-pct" value="${minPct}" placeholder="auto" readonly></td>
+                    <td><button class="btn btn-link text-danger p-0 pf-remove"><i class="fas fa-trash"></i></button></td>
+                </tr>`;
+            })
+            .join('');
+
+        this.tbody.querySelectorAll('tr').forEach((row) => {
+            const idx = parseInt(row.getAttribute('data-idx'), 10);
+            row.querySelector('.pf-symbol')?.addEventListener('change', (e) => this._handleSymbol(idx, e.target.value));
+            ['pf-entry', 'pf-objetivo', 'pf-stop', 'pf-entrada-max', 'pf-entrada-min'].forEach(cls => {
+                const el = row.querySelector(`.${cls}`);
+                if (!el) return;
+                el.addEventListener('input', () => this._updateAssetFromRow(idx, row));
+                if (cls === 'pf-entrada-max' || cls === 'pf-entrada-min') {
+                    el.addEventListener('focus', () => this._unformatCurrencyInput(el));
+                    el.addEventListener('blur', () => this._formatCurrencyInput(el, idx, cls));
+                }
+            });
+            row.querySelector('.pf-remove')?.addEventListener('click', () => this._removeAsset(idx));
+        });
+
+        if (this.countBadge) this.countBadge.textContent = `${this.assets.length}/${this.maxAssets} ativos`;
+    }
+
+    _updateAssetFromRow(idx, row) {
+        const getVal = (cls) => row.querySelector(`.${cls}`)?.value;
+        const asset = this.assets[idx];
+        asset.entrada = getVal('pf-entry');
+        asset.objetivo = getVal('pf-objetivo');
+        asset.stop = getVal('pf-stop');
+        asset.entrada_maxima = getVal('pf-entrada-max');
+        asset.entrada_minima = getVal('pf-entrada-min');
+        this._updateComputedRow(row, asset);
+    }
+
+    _updateComputedRow(row, asset) {
+        const riscoZero = this._calcRiscoZero(asset);
+        const percentEl = row.querySelector('.pf-percent');
+        const retornoEl = row.querySelector('.pf-retorno');
+        const riscoEl = row.querySelector('.pf-risco');
+        const rzPrecoEl = row.querySelector('.pf-rz-preco');
+        const entradaMaxVal = this._toNumber(asset.entrada_maxima);
+        const entradaMinVal = this._toNumber(asset.entrada_minima);
+        if (percentEl) percentEl.value = this.formatPercent(this._calcPercentual(asset));
+        if (retornoEl) retornoEl.value = this.formatPercent(this._calcRetorno(asset));
+        if (riscoEl) riscoEl.value = this.formatPercent(this._calcRisco(asset));
+        if (rzPrecoEl) rzPrecoEl.value = this.formatCurrency(riscoZero.preco);
+        const maxEl = row.querySelector('.pf-max-pct');
+        const minEl = row.querySelector('.pf-min-pct');
+        const entradaMaxEl = row.querySelector('.pf-entrada-max');
+        const entradaMinEl = row.querySelector('.pf-entrada-min');
+        const maxPctVal = this._formatPctFromEntry(asset.entrada, entradaMaxVal);
+        const minPctVal = this._formatPctFromEntry(asset.entrada, entradaMinVal);
+        if (maxEl) maxEl.value = maxPctVal;
+        if (minEl) minEl.value = minPctVal;
+        if (entradaMaxEl && document.activeElement !== entradaMaxEl) {
+            entradaMaxEl.value = Number.isFinite(entradaMaxVal) ? this.formatCurrency(entradaMaxVal) : '';
+        }
+        if (entradaMinEl && document.activeElement !== entradaMinEl) {
+            entradaMinEl.value = Number.isFinite(entradaMinVal) ? this.formatCurrency(entradaMinVal) : '';
+        }
+    }
+
+    formatCurrency(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return 'R$ 0,00';
+        return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    formatPercent(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return '0,00%';
+        return `${num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+    }
+
+    _formatCurrencyMaybe(value) {
+        const num = this._toNumber(value);
+        return Number.isFinite(num) ? this.formatCurrency(num) : '-';
+    }
+
+    _formatPctFromEntry(entry, target) {
+        const e = this._toNumber(entry);
+        const t = this._toNumber(target);
+        if (!Number.isFinite(e) || !Number.isFinite(t) || e === 0) return '-';
+        const pct = ((t / e) - 1) * 100;
+        return this.formatPercent(pct);
+    }
+
+    _calcPercentual(asset) {
+        const e = parseFloat(asset.entrada) || 0;
+        const u = parseFloat(asset.ultimo) || 0;
+        if (e <= 0 || !Number.isFinite(u)) return 0;
+        return ((u - e) / e) * 100;
+    }
+
+    async _handleSymbol(idx, symbol) {
+        this.assets[idx].symbol = symbol.toUpperCase();
+        this._render();
+        if (!symbol) return;
+        try {
+            const res = await fetch(`/api/quote/${symbol.toUpperCase()}`);
+            const data = await res.json();
+            if (data && typeof data.price === 'number') {
+                this.assets[idx].ultimo = Number(data.price);
+                this._render();
+            }
+        } catch (err) {
+            console.warn('Falha ao buscar último preço', err);
+        }
+    }
+
+    _calcRetorno(asset) {
+        const e = parseFloat(asset.entrada) || 0;
+        const o = parseFloat(asset.objetivo) || 0;
+        if (e <= 0) return 0;
+        return ((o - e) / e) * 100;
+    }
+
+    _calcRisco(asset) {
+        const e = parseFloat(asset.entrada) || 0;
+        const s = parseFloat(asset.stop) || 0;
+        if (e <= 0) return 0;
+        return ((e - s) / e) * 100;
+    }
+
+    _calcRiscoZero(asset) {
+        const e = parseFloat(asset.entrada) || 0;
+        const s = parseFloat(asset.stop) || 0;
+        if (e <= 0) return { preco: 0, pct: 0 };
+        const preco = e + (e - s);
+        const pct = ((preco - e) / e) * 100;
+        return { preco, pct };
+    }
+
+    _unformatCurrencyInput(el) {
+        const raw = (el.value || '').replace(/[^0-9,\.]/g, '');
+        const normalized = raw.replace(',', '.');
+        el.value = normalized;
+    }
+
+    _formatCurrencyInput(el, idx, cls) {
+        const num = this._toNumber(el.value);
+        if (!Number.isFinite(num)) {
+            el.value = '';
+            return;
+        }
+        el.value = this.formatCurrency(num);
+        if (typeof idx === 'number') {
+            if (cls === 'pf-entrada-max') this.assets[idx].entrada_maxima = num;
+            if (cls === 'pf-entrada-min') this.assets[idx].entrada_minima = num;
+        }
+    }
+
+    _unformatPercentInput(el) {
+        const raw = (el.value || '').replace(/[^0-9,\.\-]/g, '');
+        const normalized = raw.replace(',', '.');
+        el.value = normalized;
+    }
+
+    // Percent inputs are readonly now; leave formatting helper for future use if needed.
+    _formatPercentInput(el, idx) {
+        const num = this._toNumber(el.value);
+        if (!Number.isFinite(num)) {
+            el.value = '';
+            return;
+        }
+        el.value = this.formatPercent(num);
+    }
+
+    _toNumber(value) {
+        if (value === null || value === undefined) return NaN;
+        const clean = String(value).replace(/[^0-9,\.\-]/g, '').replace(',', '.');
+        const n = parseFloat(clean);
+        return Number.isFinite(n) ? n : NaN;
+    }
+
+    async buildPortfolio() {
+        if (this.assets.length === 0) {
+            this.showToast('Adicione ao menos 1 ativo', 'warning');
+            return;
+        }
+        if (this.assets.length > this.maxAssets) {
+            this.showToast(`Máximo de ${this.maxAssets} ativos`, 'warning');
+            return;
+        }
+        const payload = {
+            start_date: this.startInput?.value,
+            end_date: this.endInput?.value,
+            assets: this.assets.map(a => {
+                const entradaNum = parseFloat(a.entrada) || 0;
+                const entradaMaxPrice = this._toNumber(a.entrada_maxima);
+                const entradaMinPrice = this._toNumber(a.entrada_minima);
+                return {
+                    symbol: a.symbol,
+                    entrada: entradaNum,
+                    objetivo: parseFloat(a.objetivo) || 0,
+                    stop_loss: parseFloat(a.stop) || 0,
+                    entrada_maxima: Number.isFinite(entradaMaxPrice) ? entradaMaxPrice : null,
+                    entrada_minima: Number.isFinite(entradaMinPrice) ? entradaMinPrice : null,
+                };
+            }),
+        };
+
+        try {
+            const res = await fetch('/api/portfolio/v2/build', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                this.showToast(data.error || 'Falha ao construir carteira', 'danger');
+                return;
+            }
+            this.showToast('Carteira construída com sucesso', 'success');
+            this._renderPortfolioView(data.portfolio, this.lastContainer);
+            this.loadHistory();
+        } catch (err) {
+            console.error('Erro ao construir carteira', err);
+            this.showToast('Erro ao construir carteira', 'danger');
+        }
+    }
+
+    _renderPortfolioView(portfolio, container) {
+        if (!container || !portfolio) return;
+        const assets = portfolio.assets || [];
+        container.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center flex-wrap mb-2">
+                <div><strong>Período:</strong> ${portfolio.start_date} a ${portfolio.end_date}</div>
+                <span class="badge bg-light text-dark">${assets.length} ativos</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Ativo</th><th>Entrada</th><th>Objetivo</th><th>Stop</th><th>Último</th><th>%</th><th>Retorno%</th><th>Risco%</th><th>Risco Zero</th><th>Ent. Máx</th><th>Ent. Máx %</th><th>Ent. Mín</th><th>Ent. Mín %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${assets.map(a => `
+                            <tr>
+                                <td>${a.symbol}</td>
+                                <td>${this._formatCurrencyMaybe(a.entry)}</td>
+                                <td>${this._formatCurrencyMaybe(a.objective)}</td>
+                                <td>${this._formatCurrencyMaybe(a.stop_loss)}</td>
+                                <td>${this._formatCurrencyMaybe(a.ultimo_preco ?? '-')}</td>
+                                <td>${this.formatPercent(a.percentual)}</td>
+                                <td>${this.formatPercent(a.retorno_pct)}</td>
+                                <td>${this.formatPercent(a.risco_pct)}</td>
+                                <td>${this._formatCurrencyMaybe(a.risco_zero_preco)}</td>
+                                <td>${this._formatCurrencyMaybe(a.entry_maxima)}</td>
+                                <td>${this._formatPctFromEntry(a.entry, a.entry_maxima)}</td>
+                                <td>${this._formatCurrencyMaybe(a.entry_minima)}</td>
+                                <td>${this._formatPctFromEntry(a.entry, a.entry_minima)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    async loadHistory() {
+        if (!this.historyTbody) return;
+        try {
+            const res = await fetch('/api/portfolio/v2/list');
+            const data = await res.json();
+            const items = Array.isArray(data) ? data : [];
+            this.historyTbody.innerHTML = items.map(item => {
+                const assets = item.assets || [];
+                const names = assets.map(a => a.symbol).join(', ');
+                return `<tr>
+                    <td>${item.start_date} a ${item.end_date}</td>
+                    <td>${names}</td>
+                    <td>${item.created_at || '-'}</td>
+                </tr>`;
+            }).join('');
+            if (items.length > 0 && this.lastContainer) {
+                this._renderPortfolioView(items[0], this.lastContainer);
+            }
+        } catch (err) {
+            console.error('Erro ao carregar histórico de carteiras', err);
+            this.showToast('Erro ao carregar histórico de carteiras', 'danger');
+        }
+    }
 }

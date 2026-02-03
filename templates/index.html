@@ -42,6 +42,27 @@
             font-weight: bold;
             color: var(--primary-color) !important;
         }
+
+        /* Navbar colors to keep text visible on white background */
+        .navbar {
+            --bs-navbar-color: var(--primary-color);
+            --bs-navbar-hover-color: var(--secondary-color);
+            --bs-navbar-active-color: var(--secondary-color);
+            --bs-navbar-brand-color: var(--primary-color);
+            --bs-navbar-brand-hover-color: var(--secondary-color);
+            --bs-navbar-toggler-border-color: rgba(44, 62, 80, 0.35);
+            --bs-navbar-toggler-icon-bg: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba(44, 62, 80, 0.75)' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+        }
+        .navbar .nav-link,
+        .navbar .dropdown-toggle,
+        .navbar .dropdown-item {
+            color: var(--primary-color) !important;
+        }
+        .navbar .nav-link.active,
+        .navbar .nav-link:hover,
+        .navbar .dropdown-item:hover {
+            color: var(--secondary-color) !important;
+        }
         
         .stock-card {
             transition: transform 0.3s, box-shadow 0.3s;
@@ -210,6 +231,14 @@
             height: 100%;
         }
 
+        /* Carteiras: inputs mais largos para não cortar texto */
+        .pf-table td input {
+            min-width: 120px;
+        }
+        .pf-table td input.pf-symbol {
+            min-width: 90px;
+        }
+
         @media (max-width: 991.98px) {
             .dashboard-equal-height {
                 flex-direction: column;
@@ -257,6 +286,11 @@
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-section="operation">
                             <i class="fas fa-exchange-alt me-1"></i> Nova Operação
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-section="portfolio">
+                            <i class="fas fa-briefcase me-1"></i> Carteiras
                         </a>
                     </li>
                     <li class="nav-item">
@@ -419,6 +453,109 @@
             </div>
         </section>
 
+        <!-- Portfolio Section (Carteiras Semanais v2) -->
+        <section id="portfolio-section" class="section" style="display: none;">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white d-flex flex-wrap align-items-center justify-content-between">
+                    <div>
+                        <h5 class="mb-0"><i class="fas fa-briefcase me-2"></i>Carteiras Semanais</h5>
+                        <small class="text-muted">Máximo de 5 ativos, preços puxados do mercado automaticamente.</small>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center flex-wrap">
+                        <div>
+                            <label class="form-label mb-0 small">Data Inicial</label>
+                            <input type="date" class="form-control form-control-sm" id="pf-start-date">
+                        </div>
+                        <div>
+                            <label class="form-label mb-0 small">Data Final</label>
+                            <input type="date" class="form-control form-control-sm" id="pf-end-date">
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <ul class="nav nav-tabs mb-3" id="portfolio-tabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="pf-build-tab" data-bs-toggle="tab" data-bs-target="#pf-build" type="button" role="tab">Construir</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="pf-last-tab" data-bs-toggle="tab" data-bs-target="#pf-last" type="button" role="tab">Anterior</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="pf-history-tab" data-bs-toggle="tab" data-bs-target="#pf-history" type="button" role="tab">Histórico</button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content" id="portfolio-tabs-content">
+                        <!-- Construir -->
+                        <div class="tab-pane fade show active" id="pf-build" role="tabpanel">
+                            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                                <div class="text-muted small">Preencha até 5 ativos. Preço "Último" será preenchido ao digitar o ticker.</div>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-outline-secondary btn-sm" id="pf-add-asset"><i class="fas fa-plus me-2"></i>Adicionar ativo semanal</button>
+                                    <button class="btn btn-primary btn-sm" id="pf-build-btn"><i class="fas fa-hammer me-2"></i>Construir</button>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label mb-1">Texto feito para a carteira semanal</label>
+                                <textarea class="form-control" id="pf-weekly-text" rows="2" placeholder="Anotações ou texto de apoio"></textarea>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm align-middle pf-table">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Ativo</th>
+                                            <th>Entrada</th>
+                                            <th>Objetivo</th>
+                                            <th>Stop Loss</th>
+                                            <th>Último</th>
+                                            <th>%</th>
+                                            <th>Retorno%</th>
+                                            <th>Risco%</th>
+                                            <th>Risco Zero</th>
+                                            <th>Entrada Máx</th>
+                                            <th>Entrada Máx %</th>
+                                            <th>Entrada Mín</th>
+                                            <th>Entrada Mín %</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="pf-asset-tbody"></tbody>
+                                </table>
+                            </div>
+                            <div class="d-flex justify-content-end gap-2 mt-2 flex-wrap">
+                                <span class="badge bg-light text-dark" id="pf-asset-count">0/5 ativos</span>
+                            </div>
+                        </div>
+
+                        <!-- Anterior -->
+                        <div class="tab-pane fade" id="pf-last" role="tabpanel">
+                            <div id="pf-last-container" class="text-muted">Nenhuma carteira carregada.</div>
+                        </div>
+
+                        <!-- Histórico -->
+                        <div class="tab-pane fade" id="pf-history" role="tabpanel">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0">Carteiras recentes</h6>
+                                <button class="btn btn-outline-secondary btn-sm" id="pf-refresh-history"><i class="fas fa-sync-alt me-2"></i>Atualizar</button>
+                            </div>
+                            <div class="table-responsive" style="max-height: 360px; overflow-y: auto;">
+                                <table class="table table-sm">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Período</th>
+                                            <th>Ativos</th>
+                                            <th>Data criação</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="pf-history-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Chart Analysis Section -->
         <section id="chart-section" class="section" style="display: none;">
             <div class="row">
@@ -561,8 +698,7 @@
                                     <th>Status</th>
                                     <th>Data</th>
                                     <th>Ações</th>
-                                </tr>
-                            </thead>
+                                        <th>Risco Zero</th>
                             <tbody id="history-table-body">
                                 <!-- History will be loaded here -->
                             </tbody>
