@@ -1913,6 +1913,7 @@ class PortfolioUI {
         this.startInput = document.getElementById('pf-start-date');
         this.endInput = document.getElementById('pf-end-date');
         this.buildBtn = document.getElementById('pf-build-btn');
+        this.fillBtn = document.getElementById('pf-fill-demo');
         this.addBtn = document.getElementById('pf-add-asset');
         this.refreshBtn = document.getElementById('pf-refresh-history');
         this._wireEvents();
@@ -1924,7 +1925,33 @@ class PortfolioUI {
     _wireEvents() {
         this.addBtn?.addEventListener('click', () => this._addAssetRow());
         this.buildBtn?.addEventListener('click', () => this.buildPortfolio());
+        this.fillBtn?.addEventListener('click', () => this.fillTestData());
         this.refreshBtn?.addEventListener('click', () => this.loadHistory());
+    }
+
+    fillTestData() {
+        const samples = [
+            { symbol: 'PETR4', entrada: 38.0, objetivo: 41.5, stop: 36.8, entrada_maxima: 39.1, entrada_minima: 36.9 },
+            { symbol: 'VALE3', entrada: 71.0, objetivo: 76.2, stop: 68.9, entrada_maxima: 72.8, entrada_minima: 69.2 },
+            { symbol: 'ITUB4', entrada: 31.5, objetivo: 34.2, stop: 30.6, entrada_maxima: 32.4, entrada_minima: 30.6 },
+            { symbol: 'BBDC4', entrada: 13.8, objetivo: 15.1, stop: 13.2, entrada_maxima: 14.2, entrada_minima: 13.4 },
+            { symbol: 'BBAS3', entrada: 54.0, objetivo: 59.0, stop: 52.5, entrada_maxima: 55.5, entrada_minima: 52.5 },
+        ];
+        this.assets = samples.map((item) => ({
+            symbol: item.symbol,
+            entrada: item.entrada,
+            objetivo: item.objetivo,
+            stop: item.stop,
+            ultimo: '',
+            entrada_maxima: item.entrada_maxima,
+            entrada_minima: item.entrada_minima,
+        }));
+        this._render();
+        // Busca preços e recalcula % automaticamente para os ativos de teste.
+        this.assets.forEach((asset, idx) => {
+            if (asset.symbol) this._handleSymbol(idx, asset.symbol);
+        });
+        this.showToast('Dados de teste preenchidos', 'info');
     }
 
     _setDefaultDates() {

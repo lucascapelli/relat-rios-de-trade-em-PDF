@@ -81,7 +81,7 @@ def compute_asset(symbol: str, entry, objective, stop_loss, entry_maxima=None, e
         retorno_pct = round(((objective_f - entry_f) / entry_f) * 100, 2)
         risco_pct = round(((entry_f - stop_f) / entry_f) * 100, 2)
 
-    # Risco zero: mover o alvo na mesma distância do risco (entrada - stop)
+    # Risco zero: entrada + (entrada - stop)
     risco_zero_preco = entry_f + (entry_f - stop_f)
     risco_zero_pct = 0.0
     if entry_f > 0:
