@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120" preserveAspectRatio="xMidYMid meet">
+  <rect width="320" height="120" fill="none"/>
+  <g fill="#C9A646">
+    <rect x="24" y="24" width="16" height="56" rx="2"/>
+    <rect x="20" y="80" width="24" height="8"/>
+    <rect x="16" y="90" width="32" height="6"/>
+  </g>
+  <text x="70" y="60" font-family="Segoe UI, Arial, sans-serif" font-size="36" fill="#C9A646">Castling.me</text>
+</svg>

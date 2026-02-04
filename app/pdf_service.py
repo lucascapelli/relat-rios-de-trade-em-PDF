@@ -68,6 +68,18 @@ def build_pdf_payload_from_weekly_portfolio(
     disclaimer_text: Optional[str] = None,
 ) -> PdfInput:
     branding_assets = branding or BrandingAssets(**(portfolio_record.get("branding") or {}))
+    if not branding_assets.logo_path:
+        branding_assets.logo_path = "static/pdf/logo.svg"
+    if not branding_assets.icon_path:
+        branding_assets.icon_path = "static/pdf/icon_torre.svg"
+    if not branding_assets.watermark_path:
+        branding_assets.watermark_path = "static/pdf/watermark.svg"
+    if not branding_assets.cover_top_image:
+        branding_assets.cover_top_image = "static/pdf/cover_top.svg"
+    if not branding_assets.cover_bottom_image:
+        branding_assets.cover_bottom_image = "static/pdf/cover_bottom.svg"
+    if not branding_assets.disclaimer_side_image:
+        branding_assets.disclaimer_side_image = "static/pdf/disclaimer_side.svg"
 
     start_date = _format_date_str(portfolio_record.get("start_date"))
     end_date = _format_date_str(portfolio_record.get("end_date"))
@@ -186,6 +198,24 @@ class PdfReportBuilder:
             root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
             css_path = os.path.join(root_dir, "static", "pdf", "pdf.css")
             context["css_href"] = Path(css_path).resolve().as_uri()
+            branding = context.get("identity", {}).get("branding", {})
+            if branding:
+                for key in (
+                    "logo_path",
+                    "icon_path",
+                    "watermark_path",
+                    "cover_top_image",
+                    "cover_bottom_image",
+                    "disclaimer_side_image",
+                    "selo_apimec_path",
+                    "selo_cvm_path",
+                ):
+                    value = branding.get(key)
+                    if not value:
+                        continue
+                    if isinstance(value, str) and not value.startswith("http") and not value.startswith("file:"):
+                        abs_path = Path(os.path.join(root_dir, value)).resolve()
+                        branding[key] = abs_path.as_uri()
             return render_template("pdf/document.html", **context)
         except Exception:
             logger.exception("Falha ao renderizar HTML do relatorio PDF")
@@ -228,5 +258,16 @@ class PdfReportBuilder:
                     width=820,
                     height=280,
                 )
+            portfolio = getattr(payload, "portfolio", None)
+            if portfolio and not getattr(portfolio, "distribution_chart", None):
+                labels = [asset.symbol for asset in getattr(portfolio, "assets", []) or []]
+                weights = getattr(portfolio, "weights", []) or []
+                if labels and weights:
+                    portfolio.distribution_chart = ChartGenerator.render_portfolio_distribution(
+                        labels,
+                        weights,
+                        width=520,
+                        height=320,
+                    )
         except Exception:
             logger.exception("Falha ao gerar graficos de performance para PDF")

@@ -8,8 +8,10 @@ from typing import List, Optional
 class BrandingAssets:
     logo_path: Optional[str] = None
     watermark_path: Optional[str] = None
+    icon_path: Optional[str] = None
     cover_top_image: Optional[str] = None
     cover_bottom_image: Optional[str] = None
+    disclaimer_side_image: Optional[str] = None
     selo_apimec_path: Optional[str] = None
     selo_cvm_path: Optional[str] = None
     color_primary: str = "#0F1B2D"  # fundo azul-marinho/acinzentado
@@ -55,6 +57,7 @@ class AssetCard:
 class PortfolioSection:
     assets: List[AssetCard]
     weights: List[float]
+    distribution_chart: Optional[str] = None
     entered: List[str] = field(default_factory=list)
     exited: List[str] = field(default_factory=list)
     technical_notes: List[str] = field(default_factory=list)

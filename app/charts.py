@@ -550,6 +550,53 @@ def render_weekly_returns_bars_base64(
         raise
 
 
+def render_portfolio_distribution_pie_base64(
+    labels: Sequence[str],
+    weights: Sequence[float],
+    width: int = DEFAULT_WIDTH,
+    height: int = 320,
+    colors: Optional[Sequence[str]] = None,
+) -> str:
+    try:
+        series_labels = [str(label) for label in labels]
+        series_weights = pd.to_numeric(pd.Series(weights), errors="coerce").fillna(0.0)
+
+        if series_weights.empty or not series_labels:
+            raise ValueError("Dados insuficientes para gráfico de distribuição")
+
+        if len(series_labels) != len(series_weights):
+            min_len = min(len(series_labels), len(series_weights))
+            series_labels = series_labels[:min_len]
+            series_weights = series_weights.iloc[:min_len]
+
+        palette = list(colors) if colors else ["#c9a646", "#b08a4f", "#d8b06b", "#8b6b3f", "#a17a45"]
+        while len(palette) < len(series_labels):
+            palette.extend(palette)
+        palette = palette[: len(series_labels)]
+
+        fig, ax = plt.subplots(figsize=(width / 100.0, height / 100.0), dpi=200)
+        ax.pie(
+            series_weights.values,
+            labels=[f"{label} ({weight:.1f}%)" for label, weight in zip(series_labels, series_weights.values)],
+            autopct=None,
+            startangle=90,
+            colors=palette,
+            textprops={"fontsize": 7, "color": "#374151"},
+        )
+        ax.set_title("Distribuição da Carteira", fontsize=10, color="#111827")
+        ax.axis("equal")
+        fig.tight_layout()
+
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format="png", dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+        return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("utf-8")
+    except Exception:
+        logger.exception("Erro ao gerar gráfico de distribuição da carteira", exc_info=True)
+        raise
+
+
 def _apply_market_filters(
     frame: pd.DataFrame,
     tf_key: str,
@@ -1215,6 +1262,16 @@ class ChartGenerator:
     ) -> str:
         return render_weekly_returns_bars_base64(weekly_returns, labels=labels, width=width, height=height)
 
+    @staticmethod
+    def render_portfolio_distribution(
+        labels: Sequence[str],
+        weights: Sequence[float],
+        width: int = DEFAULT_WIDTH,
+        height: int = 320,
+        colors: Optional[Sequence[str]] = None,
+    ) -> str:
+        return render_portfolio_distribution_pie_base64(labels, weights, width=width, height=height, colors=colors)
+
 
 __all__ = [
     "ChartGenerator",
@@ -1222,5 +1279,6 @@ __all__ = [
     "render_price_chart_base64",
     "render_base100_comparison_base64",
     "render_weekly_returns_bars_base64",
+    "render_portfolio_distribution_pie_base64",
     "format_timeframe_label",
 ] 

@@ -744,7 +744,7 @@ def register_api_routes(app, services: Services) -> None:
 
             pdf_bytes = builder.build_pdf(payload)
             filename = f"carteira_{portfolio.get('start_date')}_{portfolio.get('end_date')}.pdf"
-            headers = {"Content-Disposition": f'inline; filename="{filename}"'}
+            headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
             return Response(pdf_bytes, mimetype="application/pdf", headers=headers)
         except Exception as exc:
             logger.exception("Erro ao gerar PDF da carteira v2")
