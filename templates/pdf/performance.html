@@ -1,44 +1,66 @@
+<!-- performance.html -->
 <section class="pdf-page performance-page">
-    <header class="section-header">
-        <h2>Performance e Estatística</h2>
-    </header>
-
-    <div class="stats-grid">
-        <div><span>Taxa de acerto</span><strong>{{ performance.win_rate }}%</strong></div>
-        <div><span>Ganho médio</span><strong>{{ performance.avg_gain }}%</strong></div>
-        <div><span>Perda média</span><strong>{{ performance.avg_loss }}%</strong></div>
-        <div><span>Vol. anualizada</span><strong>{{ performance.vol_annualized }}%</strong></div>
-        <div><span>Sharpe</span><strong>{{ performance.sharpe }}</strong></div>
-        <div><span>Alpha vs IBOV</span><strong>{{ performance.alpha_ibov }}%</strong></div>
-        <div><span>Fator de lucro</span><strong>{{ performance.profit_factor }}</strong></div>
-        <div><span>Retorno anualizado</span><strong>{{ performance.return_annualized }}%</strong></div>
-    </div>
-
-    <div class="charts-row">
-        <div class="chart-box">
-            <h4>Índice Base 100</h4>
-            {% if series.base100_chart %}
-                <img src="{{ series.base100_chart }}" alt="Índice base 100" class="chart-img" />
-            {% elif series.cumulative_castling and series.cumulative_ibov %}
-                <div class="chart-placeholder">Gráfico indisponível.</div>
-            {% else %}
-                <div class="chart-placeholder">Sem série histórica fornecida.</div>
+    <header class="section-header ribbon-header">
+        <div class="ribbon">Como foi até aqui?</div>
+        <div class="section-icon">
+            {% if identity.branding.icon_path %}
+                <img src="{{ identity.branding.icon_path }}" alt="Ícone" class="icon-img">
             {% endif %}
         </div>
-        <div class="chart-box">
-            <h4>Últimas 12 semanas</h4>
-            {% if series.weekly_chart %}
-                <img src="{{ series.weekly_chart }}" alt="Últimas 12 semanas" class="chart-img" />
-            {% elif series.weekly_returns %}
-                <div class="chart-placeholder">Gráfico indisponível.</div>
-            {% else %}
-                <div class="chart-placeholder">Sem dados semanais.</div>
-            {% endif %}
+    </header>
+
+    <div class="performance-grid">
+        <div class="stats-column">
+            <table class="stats-table">
+                <thead>
+                    <tr><th colspan="2">ESTATÍSTICA</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Taxa de acerto</td><td>{{ performance.win_rate }}%</td></tr>
+                    <tr><td>Ganho médio</td><td>{{ performance.avg_gain }}%</td></tr>
+                    <tr><td>Perda média</td><td>{{ performance.avg_loss }}%</td></tr>
+                    <tr><td>Vol. anualizada</td><td>{{ performance.vol_annualized }}%</td></tr>
+                </tbody>
+            </table>
+            <table class="stats-table">
+                <thead>
+                    <tr><th colspan="2">PERFORMANCE</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Sharpe</td><td>{{ performance.sharpe }}</td></tr>
+                    <tr><td>Alpha vs IBOV</td><td>{{ performance.alpha_ibov }}%</td></tr>
+                    <tr><td>Fator de lucro</td><td>{{ performance.profit_factor }}</td></tr>
+                    <tr><td>Retorno anualizado</td><td>{{ performance.return_annualized }}%</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="charts-column">
+            <div class="chart-box">
+                <h4>Índice Base 100</h4>
+                {% if series.base100_chart %}
+                    <img src="{{ series.base100_chart }}" alt="Índice base 100" class="chart-img" />
+                {% elif series.cumulative_castling and series.cumulative_ibov %}
+                    <div class="chart-placeholder">Gráfico indisponível.</div>
+                {% else %}
+                    <div class="chart-placeholder">Sem série histórica fornecida.</div>
+                {% endif %}
+            </div>
+            <div class="chart-box">
+                <h4>Últimas 12 semanas</h4>
+                {% if series.weekly_chart %}
+                    <img src="{{ series.weekly_chart }}" alt="Últimas 12 semanas" class="chart-img" />
+                {% elif series.weekly_returns %}
+                    <div class="chart-placeholder">Gráfico indisponível.</div>
+                {% else %}
+                    <div class="chart-placeholder">Sem dados semanais.</div>
+                {% endif %}
+            </div>
         </div>
     </div>
 
     <section class="compliance-notes">
         <h4>Instruções de execução</h4>
-        <p>Stop/Take: ajustar conforme gap de abertura; após parcial, mover stop conforme regra definida na estratégia.</p>
+        <p>Recomendamos a execução das ordens de stop loss e take profit o mais próximo possível dos preços de referência. Caso o ativo abra em gap, ultrapassando os níveis de execução do stop ou do take profit, sugerimos a saída imediata ao de melhor preço disponível. Eventos extraordinários podem resultar em uma maior perda dos parâmetros previamente estabelecidos para stop ou alvo. No caso de saídas parciais, o procedimento operacional consiste em encerrar metade da posição no nível pré-definido para a saída parcial e ajustar o preço de entrada como o novo stop loss. É importante destacar que essa operação de saída parcial não é contabilizada no retorno total da operação.</p>
+        <p>Por fim, operações automatizadas podem ser encerradas ou ter seus parâmetros ajustados a critério do analista.</p>
     </section>
 </section>

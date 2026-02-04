@@ -1,15 +1,25 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+    <!-- document.html -->
     <meta charset="UTF-8">
     <link rel="stylesheet" href="{{ css_href }}">
     <title>{{ identity.title }}</title>
 </head>
 <body>
+    <!-- cover.html - Página 1 (capa) -->
     {% include 'pdf/cover.html' %}
+    
+    <!-- intro.html - Página 2 (introdução) -->
     {% include 'pdf/intro.html' %}
+    
+    <!-- selection.html - Página 3 (seleção de ativos) -->
     {% include 'pdf/selection.html' %}
+    
+    <!-- performance.html - Página 4 (performance) -->
     {% include 'pdf/performance.html' %}
+    
+    <!-- disclaimer.html - Página 5 (disclaimer) -->
     {% include 'pdf/disclaimer.html' %}
 </body>
 </html>

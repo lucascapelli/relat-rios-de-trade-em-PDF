@@ -1,19 +1,41 @@
-<section class="pdf-page cover-page" style="background: {{ identity.branding.color_primary }}; color: {{ identity.branding.color_text }};">
-    <div class="cover-top" style="background-image: url('{{ identity.branding.cover_top_image or '' }}');"></div>
-    <div class="cover-content">
-        <div class="cover-logo">
-            {% if identity.branding.logo_path %}
-                <img src="{{ identity.branding.logo_path }}" alt="Logo" class="logo">
-            {% else %}
-                <div class="logo-placeholder">Castling.me</div>
-            {% endif %}
-        </div>
-        <h1 class="cover-title">{{ identity.title|upper }}</h1>
-        <div class="cover-period">
-            <span>{{ identity.period_start }}</span>
-            <span class="arrow">→</span>
-            <span>{{ identity.period_end }}</span>
-        </div>
+<!-- cover.html -->
+<section class="pdf-page cover-page"
+  style="--page-bg: {{ identity.branding.color_primary }}; --page-color: {{ identity.branding.color_text }}; --brand-accent: {{ identity.branding.color_accent }};">
+  <div class="cover-top">
+    {% if identity.branding.cover_top_image %}
+      <img src="{{ identity.branding.cover_top_image }}" alt="Cover Top">
+    {% endif %}
+  </div>
+
+  <div class="cover-gold-band"></div>
+
+  <div class="cover-content">
+    <div class="cover-main">
+      <div class="cover-logo">
+        {% if identity.branding.logo_path %}
+          <img src="{{ identity.branding.logo_path }}" alt="Logo" class="logo">
+        {% else %}
+          <div class="logo-placeholder">Castling.me</div>
+        {% endif %}
+      </div>
+
+      <h1 class="cover-title">{{ identity.title|upper }}</h1>
+
+      <div class="cover-period">
+        <span>{{ identity.period_start }}</span>
+        <span class="arrow">→</span>
+        <span>{{ identity.period_end }}</span>
+      </div>
     </div>
-    <div class="cover-bottom" style="background-image: url('{{ identity.branding.cover_bottom_image or '' }}');"></div>
+
+    <div class="cover-footer">
+      <div class="footer-link"><a href="{{ editorial.link }}">{{ editorial.link }}</a></div>
+    </div>
+  </div>
+
+  <div class="cover-bottom">
+    {% if identity.branding.cover_bottom_image %}
+      <img src="{{ identity.branding.cover_bottom_image }}" alt="Cover Bottom">
+    {% endif %}
+  </div>
 </section>

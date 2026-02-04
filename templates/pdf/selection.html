@@ -1,27 +1,32 @@
+<!-- selection.html -->
 <section class="pdf-page selection-page">
-    <header class="section-header">
-        <h2>Seleção Atual</h2>
-        <div class="period">{{ identity.period_start }} → {{ identity.period_end }}</div>
+    <header class="section-header ribbon-header">
+        <div class="ribbon">Seleção Atual</div>
+        <div class="section-icon">
+            {% if identity.branding.icon_path %}
+                <img src="{{ identity.branding.icon_path }}" alt="Ícone" class="icon-img">
+            {% endif %}
+        </div>
     </header>
 
     <table class="table-assets">
         <thead>
             <tr>
-                <th>Ativo</th>
+                <th>Ação</th>
                 <th>Entrada</th>
                 <th>Ent. Máx</th>
                 <th>Ent. Mín</th>
                 <th>Alvo</th>
                 <th>Stop</th>
-                <th>Retorno %</th>
-                <th>Risco %</th>
+                <th>Retorno</th>
+                <th>Risco</th>
                 <th>Risco 0</th>
             </tr>
         </thead>
         <tbody>
         {% for a in portfolio.assets %}
             <tr>
-                <td>{{ a.symbol }}</td>
+                <td class="ticker">{{ a.symbol }}</td>
                 <td>{{ a.entrada | round(2) }}</td>
                 <td>{{ a.entrada_maxima if a.entrada_maxima is not none else '-' }}</td>
                 <td>{{ a.entrada_minima if a.entrada_minima is not none else '-' }}</td>
@@ -35,27 +40,50 @@
         </tbody>
     </table>
 
-    <section class="delta-section">
-        <div>
-            <h4>Entrou</h4>
-            <p>{{ portfolio.entered|join(', ') if portfolio.entered else '—' }}</p>
+    <div class="selection-grid">
+        <div class="delta-box">
+            <table class="delta-table">
+                <thead>
+                    <tr>
+                        <th>SAIU</th>
+                        <th>ENTROU</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set max_len = [portfolio.entered|length, portfolio.exited|length]|max %}
+                    {% for idx in range(max_len) %}
+                        <tr>
+                            <td>{{ portfolio.exited[idx] if portfolio.exited|length > idx else '' }}</td>
+                            <td>{{ portfolio.entered[idx] if portfolio.entered|length > idx else '' }}</td>
+                        </tr>
+                    {% endfor %}
+                    {% if max_len == 0 %}
+                        <tr>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
         </div>
-        <div>
-            <h4>Saiu</h4>
-            <p>{{ portfolio.exited|join(', ') if portfolio.exited else '—' }}</p>
+        <div class="pie-box">
+            {% if portfolio.distribution_chart %}
+                <img src="{{ portfolio.distribution_chart }}" alt="Distribuição da Carteira" class="chart-img" />
+            {% else %}
+                <div class="chart-placeholder">Distribuição indisponível.</div>
+            {% endif %}
         </div>
-    </section>
+    </div>
 
     <section class="notes-section">
         <h4>Comentários Técnicos</h4>
-        <ul>
-            {% if portfolio.technical_notes %}
-                {% for note in portfolio.technical_notes %}
-                    <li>{{ note }}</li>
-                {% endfor %}
-            {% else %}
-                <li>Sem comentários técnicos informados.</li>
-            {% endif %}
-        </ul>
+        {% if portfolio.technical_notes %}
+            {% for note in portfolio.technical_notes %}
+                <p>{{ note }}</p>
+            {% endfor %}
+        {% else %}
+            <p>Sem comentários técnicos informados.</p>
+        {% endif %}
     </section>
+    <div class="footer-link"><a href="{{ editorial.link }}">{{ editorial.link }}</a></div>
 </section>
