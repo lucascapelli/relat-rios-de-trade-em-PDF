@@ -1,0 +1,44 @@
+<section class="pdf-page performance-page">
+    <header class="section-header">
+        <h2>Performance e Estatística</h2>
+    </header>
+
+    <div class="stats-grid">
+        <div><span>Taxa de acerto</span><strong>{{ performance.win_rate }}%</strong></div>
+        <div><span>Ganho médio</span><strong>{{ performance.avg_gain }}%</strong></div>
+        <div><span>Perda média</span><strong>{{ performance.avg_loss }}%</strong></div>
+        <div><span>Vol. anualizada</span><strong>{{ performance.vol_annualized }}%</strong></div>
+        <div><span>Sharpe</span><strong>{{ performance.sharpe }}</strong></div>
+        <div><span>Alpha vs IBOV</span><strong>{{ performance.alpha_ibov }}%</strong></div>
+        <div><span>Fator de lucro</span><strong>{{ performance.profit_factor }}</strong></div>
+        <div><span>Retorno anualizado</span><strong>{{ performance.return_annualized }}%</strong></div>
+    </div>
+
+    <div class="charts-row">
+        <div class="chart-box">
+            <h4>Índice Base 100</h4>
+            {% if series.base100_chart %}
+                <img src="{{ series.base100_chart }}" alt="Índice base 100" class="chart-img" />
+            {% elif series.cumulative_castling and series.cumulative_ibov %}
+                <div class="chart-placeholder">Gráfico indisponível.</div>
+            {% else %}
+                <div class="chart-placeholder">Sem série histórica fornecida.</div>
+            {% endif %}
+        </div>
+        <div class="chart-box">
+            <h4>Últimas 12 semanas</h4>
+            {% if series.weekly_chart %}
+                <img src="{{ series.weekly_chart }}" alt="Últimas 12 semanas" class="chart-img" />
+            {% elif series.weekly_returns %}
+                <div class="chart-placeholder">Gráfico indisponível.</div>
+            {% else %}
+                <div class="chart-placeholder">Sem dados semanais.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <section class="compliance-notes">
+        <h4>Instruções de execução</h4>
+        <p>Stop/Take: ajustar conforme gap de abertura; após parcial, mover stop conforme regra definida na estratégia.</p>
+    </section>
+</section>

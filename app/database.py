@@ -126,7 +126,15 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 start_date TEXT NOT NULL,
                 end_date TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                entered TEXT,
+                exited TEXT,
+                technical_notes TEXT,
+                performance_json TEXT,
+                series_json TEXT,
+                branding_json TEXT,
+                editorial_text TEXT,
+                disclaimer_text TEXT
             )
             """
             )
@@ -155,6 +163,9 @@ class Database:
 
             con.commit()
 
+            # Garante colunas opcionais para carteira semanal
+            self._ensure_weekly_portfolio_columns(cur)
+
     def _ensure_new_columns(self, cursor: sqlite3.Cursor) -> None:
         cursor.execute("PRAGMA table_info(operations)")
         existing = {row[1] for row in cursor.fetchall()}
@@ -165,6 +176,24 @@ class Database:
             "parcial_pontos": "ALTER TABLE operations ADD COLUMN parcial_pontos REAL",
             "tick_size": "ALTER TABLE operations ADD COLUMN tick_size REAL",
             "risco_retorno": "ALTER TABLE operations ADD COLUMN risco_retorno REAL",
+        }
+
+        for column, ddl in columns_to_add.items():
+            if column not in existing:
+                cursor.execute(ddl)
+
+    def _ensure_weekly_portfolio_columns(self, cursor: sqlite3.Cursor) -> None:
+        cursor.execute("PRAGMA table_info(weekly_portfolios)")
+        existing = {row[1] for row in cursor.fetchall()}
+        columns_to_add = {
+            "entered": "ALTER TABLE weekly_portfolios ADD COLUMN entered TEXT",
+            "exited": "ALTER TABLE weekly_portfolios ADD COLUMN exited TEXT",
+            "technical_notes": "ALTER TABLE weekly_portfolios ADD COLUMN technical_notes TEXT",
+            "performance_json": "ALTER TABLE weekly_portfolios ADD COLUMN performance_json TEXT",
+            "series_json": "ALTER TABLE weekly_portfolios ADD COLUMN series_json TEXT",
+            "branding_json": "ALTER TABLE weekly_portfolios ADD COLUMN branding_json TEXT",
+            "editorial_text": "ALTER TABLE weekly_portfolios ADD COLUMN editorial_text TEXT",
+            "disclaimer_text": "ALTER TABLE weekly_portfolios ADD COLUMN disclaimer_text TEXT",
         }
 
         for column, ddl in columns_to_add.items():
@@ -565,18 +594,31 @@ class Database:
 
     # ========== WEEKLY PORTFOLIO V2 (nova carteira) ========== 
     def insert_weekly_portfolio(self, portfolio: Dict[str, Any], assets: List[Dict[str, Any]]) -> int:
-        """Insert a new weekly portfolio (v2) with computed assets."""
+        """Insert a new weekly portfolio (v2) with computed assets and metadata."""
         with self._connect() as con:
             cur = con.cursor()
             cur.execute(
                 """
-                INSERT INTO weekly_portfolios (start_date, end_date, created_at)
-                VALUES (?, ?, ?)
+                INSERT INTO weekly_portfolios (
+                    start_date, end_date, created_at,
+                    entered, exited, technical_notes,
+                    performance_json, series_json, branding_json,
+                    editorial_text, disclaimer_text
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     portfolio["start_date"],
                     portfolio["end_date"],
                     portfolio["created_at"],
+                    json.dumps(portfolio.get("entered") or []),
+                    json.dumps(portfolio.get("exited") or []),
+                    json.dumps(portfolio.get("technical_notes") or []),
+                    json.dumps(portfolio.get("performance") or {}),
+                    json.dumps(portfolio.get("series") or {}),
+                    json.dumps(portfolio.get("branding") or {}),
+                    portfolio.get("editorial_text"),
+                    portfolio.get("disclaimer_text"),
                 ),
             )
             portfolio_id = cur.lastrowid
@@ -615,7 +657,11 @@ class Database:
         """List saved weekly portfolios with their assets."""
         with self._connect() as con:
             cur = con.cursor()
-            base_query = "SELECT id, start_date, end_date, created_at FROM weekly_portfolios ORDER BY id DESC"
+            base_query = (
+                "SELECT id, start_date, end_date, created_at, entered, exited, technical_notes, "
+                "performance_json, series_json, branding_json, editorial_text, disclaimer_text "
+                "FROM weekly_portfolios ORDER BY id DESC"
+            )
             if limit is None:
                 cur.execute(base_query)
             else:
@@ -659,8 +705,77 @@ class Database:
                         "start_date": row[1],
                         "end_date": row[2],
                         "created_at": row[3],
+                        "entered": json.loads(row[4] or "[]"),
+                        "exited": json.loads(row[5] or "[]"),
+                        "technical_notes": json.loads(row[6] or "[]"),
+                        "performance": json.loads(row[7] or "{}"),
+                        "series": json.loads(row[8] or "{}"),
+                        "branding": json.loads(row[9] or "{}"),
+                        "editorial_text": row[10],
+                        "disclaimer_text": row[11],
                         "assets": assets,
                     }
                 )
 
             return portfolios
+
+    def get_weekly_portfolio(self, portfolio_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch a single weekly portfolio with its assets."""
+        with self._connect() as con:
+            cur = con.cursor()
+            cur.execute(
+                """
+                SELECT id, start_date, end_date, created_at, entered, exited, technical_notes,
+                       performance_json, series_json, branding_json, editorial_text, disclaimer_text
+                FROM weekly_portfolios WHERE id = ?
+                """,
+                (int(portfolio_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            cur.execute(
+                """
+                SELECT symbol, entry, objective, stop_loss, entry_maxima, entry_minima,
+                       ultimo_preco, percentual, retorno_pct, risco_pct,
+                       risco_zero_preco, risco_zero_pct
+                FROM weekly_portfolio_assets
+                WHERE portfolio_id = ?
+                ORDER BY id ASC
+                """,
+                (int(portfolio_id),),
+            )
+            assets = [
+                {
+                    "symbol": a[0],
+                    "entry": a[1],
+                    "objective": a[2],
+                    "stop_loss": a[3],
+                    "entry_maxima": a[4],
+                    "entry_minima": a[5],
+                    "ultimo_preco": a[6],
+                    "percentual": a[7],
+                    "retorno_pct": a[8],
+                    "risco_pct": a[9],
+                    "risco_zero_preco": a[10],
+                    "risco_zero_pct": a[11],
+                }
+                for a in cur.fetchall()
+            ]
+
+            return {
+                "id": row[0],
+                "start_date": row[1],
+                "end_date": row[2],
+                "created_at": row[3],
+                "entered": json.loads(row[4] or "[]"),
+                "exited": json.loads(row[5] or "[]"),
+                "technical_notes": json.loads(row[6] or "[]"),
+                "performance": json.loads(row[7] or "{}"),
+                "series": json.loads(row[8] or "{}"),
+                "branding": json.loads(row[9] or "{}"),
+                "editorial_text": row[10],
+                "disclaimer_text": row[11],
+                "assets": assets,
+            }

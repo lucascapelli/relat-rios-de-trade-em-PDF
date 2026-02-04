@@ -1913,9 +1913,12 @@ class PortfolioUI {
         this.startInput = document.getElementById('pf-start-date');
         this.endInput = document.getElementById('pf-end-date');
         this.buildBtn = document.getElementById('pf-build-btn');
+        this.generatePdfBtn = document.getElementById('pf-generate-pdf');
         this.fillBtn = document.getElementById('pf-fill-demo');
         this.addBtn = document.getElementById('pf-add-asset');
         this.refreshBtn = document.getElementById('pf-refresh-history');
+        this.lastPortfolioId = null;
+        this.lastPortfolio = null;
         this._wireEvents();
         this._setDefaultDates();
         this._addAssetRow();
@@ -1926,7 +1929,42 @@ class PortfolioUI {
         this.addBtn?.addEventListener('click', () => this._addAssetRow());
         this.buildBtn?.addEventListener('click', () => this.buildPortfolio());
         this.fillBtn?.addEventListener('click', () => this.fillTestData());
+        this.generatePdfBtn?.addEventListener('click', () => this.generatePdf());
         this.refreshBtn?.addEventListener('click', () => this.loadHistory());
+    }
+
+    generatePdf() {
+        const id = this.lastPortfolioId;
+        const query = id ? `?id=${id}` : '';
+        if (!id) {
+            this.showToast('Nenhuma carteira salva para gerar PDF. Salve ou recarregue o histórico.', 'info');
+        }
+        fetch(`/api/portfolio/v2/pdf${query}`)
+            .then(async (res) => {
+                const ctype = res.headers.get('content-type') || '';
+                if (ctype.includes('application/json')) {
+                    const data = await res.json().catch(() => ({}));
+                    const detail = data && data.error ? `: ${data.error}` : '';
+                    this.showToast(`Falha ao gerar PDF${detail}`, 'warning');
+                    if (data && data.html) {
+                        console.warn('HTML retornado (debug PDF):', data.html);
+                    }
+                    return;
+                }
+                if (!res.ok) {
+                    this.showToast('Falha ao gerar PDF', 'danger');
+                    return;
+                }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                window.open(url, '_blank');
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+                this.showToast('PDF gerado com sucesso', 'success');
+            })
+            .catch((err) => {
+                console.error('Erro ao gerar PDF da carteira', err);
+                this.showToast('Erro ao gerar PDF da carteira', 'danger');
+            });
     }
 
     fillTestData() {
@@ -2226,12 +2264,22 @@ class PortfolioUI {
                 return;
             }
             this.showToast('Carteira construída com sucesso', 'success');
+            this.lastPortfolioId = data.id || null;
+            this.lastPortfolio = data.portfolio || null;
             this._renderPortfolioView(data.portfolio, this.lastContainer);
             this.loadHistory();
+            this._resetForm();
         } catch (err) {
             console.error('Erro ao construir carteira', err);
             this.showToast('Erro ao construir carteira', 'danger');
         }
+    }
+
+    _resetForm() {
+        this.assets = [];
+        this._addAssetRow();
+        const weeklyText = document.getElementById('pf-weekly-text');
+        if (weeklyText) weeklyText.value = '';
     }
 
     _renderPortfolioView(portfolio, container) {
@@ -2289,6 +2337,8 @@ class PortfolioUI {
                 </tr>`;
             }).join('');
             if (items.length > 0 && this.lastContainer) {
+                this.lastPortfolioId = items[0].id || items[0].portfolio_id || null;
+                this.lastPortfolio = items[0];
                 this._renderPortfolioView(items[0], this.lastContainer);
             }
         } catch (err) {

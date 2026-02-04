@@ -1,0 +1,19 @@
+<section class="pdf-page cover-page" style="background: {{ identity.branding.color_primary }}; color: {{ identity.branding.color_text }};">
+    <div class="cover-top" style="background-image: url('{{ identity.branding.cover_top_image or '' }}');"></div>
+    <div class="cover-content">
+        <div class="cover-logo">
+            {% if identity.branding.logo_path %}
+                <img src="{{ identity.branding.logo_path }}" alt="Logo" class="logo">
+            {% else %}
+                <div class="logo-placeholder">Castling.me</div>
+            {% endif %}
+        </div>
+        <h1 class="cover-title">{{ identity.title|upper }}</h1>
+        <div class="cover-period">
+            <span>{{ identity.period_start }}</span>
+            <span class="arrow">→</span>
+            <span>{{ identity.period_end }}</span>
+        </div>
+    </div>
+    <div class="cover-bottom" style="background-image: url('{{ identity.branding.cover_bottom_image or '' }}');"></div>
+</section>

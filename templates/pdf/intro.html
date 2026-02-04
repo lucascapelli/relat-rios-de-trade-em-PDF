@@ -1,0 +1,13 @@
+<section class="pdf-page intro-page" style="color: {{ identity.branding.color_primary }};">
+    <div class="frame-top" style="border-color: {{ identity.branding.color_accent }};"></div>
+    <div class="watermark" style="background-image: url('{{ identity.branding.watermark_path or '' }}');"></div>
+    <div class="intro-content">
+        <h2 style="color: {{ identity.branding.color_primary }};">{{ editorial.headline }}</h2>
+        <p class="intro-body">{{ editorial.body }}</p>
+        <p class="intro-footnote">
+            Seleção atual com <strong>{{ editorial.assets_count }}</strong> ativos · Histórico desde {{ editorial.history_since }} · Benchmark: {{ editorial.benchmark }}
+        </p>
+    </div>
+    <div class="frame-bottom" style="border-color: {{ identity.branding.color_accent }};"></div>
+    <div class="footer-link"><a href="{{ editorial.link }}">{{ editorial.link }}</a></div>
+</section>

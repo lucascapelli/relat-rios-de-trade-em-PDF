@@ -9,3 +9,4 @@ eventlet
 reportlab
 pandas_ta
 feedparser
+weasyprint

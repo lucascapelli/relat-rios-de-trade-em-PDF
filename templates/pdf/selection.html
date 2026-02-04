@@ -1,0 +1,61 @@
+<section class="pdf-page selection-page">
+    <header class="section-header">
+        <h2>Seleção Atual</h2>
+        <div class="period">{{ identity.period_start }} → {{ identity.period_end }}</div>
+    </header>
+
+    <table class="table-assets">
+        <thead>
+            <tr>
+                <th>Ativo</th>
+                <th>Entrada</th>
+                <th>Ent. Máx</th>
+                <th>Ent. Mín</th>
+                <th>Alvo</th>
+                <th>Stop</th>
+                <th>Retorno %</th>
+                <th>Risco %</th>
+                <th>Risco 0</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for a in portfolio.assets %}
+            <tr>
+                <td>{{ a.symbol }}</td>
+                <td>{{ a.entrada | round(2) }}</td>
+                <td>{{ a.entrada_maxima if a.entrada_maxima is not none else '-' }}</td>
+                <td>{{ a.entrada_minima if a.entrada_minima is not none else '-' }}</td>
+                <td class="pos">{{ a.objetivo | round(2) }}</td>
+                <td class="neg">{{ a.stop_loss | round(2) }}</td>
+                <td class="pos">{{ a.retorno_pct | round(2) }}%</td>
+                <td class="neg">{{ a.risco_pct | round(2) }}%</td>
+                <td>{{ a.risco_zero_preco | round(2) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <section class="delta-section">
+        <div>
+            <h4>Entrou</h4>
+            <p>{{ portfolio.entered|join(', ') if portfolio.entered else '—' }}</p>
+        </div>
+        <div>
+            <h4>Saiu</h4>
+            <p>{{ portfolio.exited|join(', ') if portfolio.exited else '—' }}</p>
+        </div>
+    </section>
+
+    <section class="notes-section">
+        <h4>Comentários Técnicos</h4>
+        <ul>
+            {% if portfolio.technical_notes %}
+                {% for note in portfolio.technical_notes %}
+                    <li>{{ note }}</li>
+                {% endfor %}
+            {% else %}
+                <li>Sem comentários técnicos informados.</li>
+            {% endif %}
+        </ul>
+    </section>
+</section>

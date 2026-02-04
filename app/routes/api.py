@@ -8,11 +8,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import plotly
-from flask import Blueprint, jsonify, redirect, render_template, request, send_from_directory
+from flask import Blueprint, Response, jsonify, redirect, render_template, request, send_from_directory
 from ..charts import ChartGenerator, format_timeframe_label
 from ..config import PLACEHOLDER_IMAGE_DATA_URL, REPORTS_DIR
 from ..indicators import TechnicalNarrative
 from ..models import Operation, asdict
+from ..pdf_service import PdfReportBuilder, build_pdf_payload_from_weekly_portfolio
 from ..portfolio import MAX_ASSETS, build_weekly_portfolio
 from ..services import Services
 from ..utils import logger
@@ -632,6 +633,14 @@ def register_api_routes(app, services: Services) -> None:
             raw_assets = payload.get("assets") or []
             start_date = _parse_date(payload.get("start_date"))
             end_date = _parse_date(payload.get("end_date"))
+            entered = payload.get("entered") or []
+            exited = payload.get("exited") or []
+            technical_notes = payload.get("technical_notes") or []
+            performance_data = payload.get("performance") or {}
+            series_data = payload.get("series") or {}
+            branding_data = payload.get("branding") or {}
+            editorial_text = payload.get("editorial_text")
+            disclaimer_text = payload.get("disclaimer_text")
 
             if len(raw_assets) > MAX_ASSETS:
                 return jsonify({"error": f"Máximo de {MAX_ASSETS} ativos"}), 400
@@ -661,11 +670,35 @@ def register_api_routes(app, services: Services) -> None:
                     "start_date": portfolio.start_date.isoformat(),
                     "end_date": portfolio.end_date.isoformat(),
                     "created_at": now_str,
+                    "entered": entered,
+                    "exited": exited,
+                    "technical_notes": technical_notes,
+                    "performance": performance_data,
+                    "series": series_data,
+                    "branding": branding_data,
+                    "editorial_text": editorial_text,
+                    "disclaimer_text": disclaimer_text,
                 },
                 [a.to_dict() for a in portfolio.assets],
             )
 
-            return jsonify({"id": portfolio_id, "status": "success", "portfolio": portfolio.to_dict()})
+            return jsonify(
+                {
+                    "id": portfolio_id,
+                    "status": "success",
+                    "portfolio": {
+                        **portfolio.to_dict(),
+                        "entered": entered,
+                        "exited": exited,
+                        "technical_notes": technical_notes,
+                        "performance": performance_data,
+                        "series": series_data,
+                        "branding": branding_data,
+                        "editorial_text": editorial_text,
+                        "disclaimer_text": disclaimer_text,
+                    },
+                }
+            )
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -681,6 +714,41 @@ def register_api_routes(app, services: Services) -> None:
         except Exception as exc:
             logger.error(f"Erro ao listar carteiras v2: {exc}")
             return jsonify([])
+
+    @bp.route("/api/portfolio/v2/pdf", methods=["GET"])
+    @login_required
+    def api_portfolio_pdf_v2():
+        try:
+            portfolio_id = request.args.get("portfolio_id", type=int) or request.args.get("id", type=int)
+            output_format = (request.args.get("format") or "pdf").lower()
+
+            if portfolio_id:
+                portfolio = database.get_weekly_portfolio(int(portfolio_id))
+            else:
+                existing = database.list_weekly_portfolios(limit=1)
+                portfolio = existing[0] if existing else None
+
+            if not portfolio:
+                return jsonify({"error": "Carteira não encontrada"}), 404
+
+            payload = build_pdf_payload_from_weekly_portfolio(portfolio)
+            base_url = request.url_root.rstrip("/")
+            builder = PdfReportBuilder(base_url=base_url)
+            html = builder.render_html(payload)
+
+            if output_format == "html":
+                return html
+
+            if builder.engine is None:
+                return jsonify({"error": "Engine de PDF não configurada", "html": html}), 503
+
+            pdf_bytes = builder.build_pdf(payload)
+            filename = f"carteira_{portfolio.get('start_date')}_{portfolio.get('end_date')}.pdf"
+            headers = {"Content-Disposition": f'inline; filename="{filename}"'}
+            return Response(pdf_bytes, mimetype="application/pdf", headers=headers)
+        except Exception as exc:
+            logger.exception("Erro ao gerar PDF da carteira v2")
+            return jsonify({"error": "Falha ao gerar PDF"}), 500
 
     @bp.route("/api/swing-trade/<int:trade_id>/pdf", methods=["GET"])
     def api_swing_trade_pdf(trade_id):

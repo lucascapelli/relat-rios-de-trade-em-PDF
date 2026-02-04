@@ -454,6 +454,102 @@ def _normalize_timezone(frame: pd.DataFrame, target_tz: str) -> pd.DataFrame:
     return frame
 
 
+def render_base100_comparison_base64(
+    castling: Sequence[float],
+    ibov: Sequence[float],
+    labels: Optional[Sequence[str]] = None,
+    width: int = DEFAULT_WIDTH,
+    height: int = 320,
+) -> str:
+    try:
+        series_castling = pd.to_numeric(pd.Series(castling), errors="coerce").dropna()
+        series_ibov = pd.to_numeric(pd.Series(ibov), errors="coerce").dropna()
+
+        if series_castling.empty or series_ibov.empty:
+            raise ValueError("Dados insuficientes para gráfico base 100")
+
+        aligned_len = min(len(series_castling), len(series_ibov))
+        series_castling = series_castling.iloc[:aligned_len]
+        series_ibov = series_ibov.iloc[:aligned_len]
+
+        x = np.arange(aligned_len)
+        if labels and len(labels) >= aligned_len:
+            tick_labels = list(labels)[:aligned_len]
+        else:
+            tick_labels = [str(i + 1) for i in range(aligned_len)]
+
+        fig, ax = plt.subplots(figsize=(width / 100.0, height / 100.0), dpi=200)
+        ax.plot(x, series_castling.values, label="Castling", color="#1E88E5", linewidth=2.0)
+        ax.plot(x, series_ibov.values, label="IBOV", color="#C9A646", linewidth=1.6, linestyle="--")
+        ax.set_title("Índice Base 100", fontsize=10, color="#111827")
+        ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.6)
+        ax.set_facecolor("white")
+        fig.patch.set_facecolor("white")
+        ax.legend(loc="upper left", fontsize=8, frameon=False)
+        ax.tick_params(axis="both", labelsize=7)
+
+        step = max(1, int(len(tick_labels) / 8)) if len(tick_labels) > 8 else 1
+        ax.set_xticks(x[::step])
+        ax.set_xticklabels(tick_labels[::step], rotation=45, ha="right")
+        ax.set_ylabel("Índice (base 100)", fontsize=8)
+        ax.set_xlabel("")
+
+        fig.tight_layout()
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format="png", dpi=200)
+        plt.close(fig)
+
+        return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("utf-8")
+    except Exception:
+        logger.exception("Erro ao gerar gráfico de base 100", exc_info=True)
+        raise
+
+
+def render_weekly_returns_bars_base64(
+    weekly_returns: Sequence[float],
+    labels: Optional[Sequence[str]] = None,
+    width: int = DEFAULT_WIDTH,
+    height: int = 280,
+) -> str:
+    try:
+        series = pd.to_numeric(pd.Series(weekly_returns), errors="coerce").dropna()
+
+        if series.empty:
+            raise ValueError("Dados insuficientes para gráfico de barras semanais")
+
+        x = np.arange(len(series))
+        if labels and len(labels) >= len(series):
+            tick_labels = list(labels)[: len(series)]
+        else:
+            tick_labels = [f"S{i + 1}" for i in range(len(series))]
+
+        colors_bar = np.where(series >= 0, "#2c8f74", "#d9534f")
+
+        fig, ax = plt.subplots(figsize=(width / 100.0, height / 100.0), dpi=200)
+        ax.bar(x, series.values, color=colors_bar, alpha=0.85)
+        ax.axhline(0, color="#9ca3af", linewidth=0.9)
+        ax.set_title("Últimas 12 semanas", fontsize=10, color="#111827")
+        ax.grid(True, axis="y", linestyle=":", linewidth=0.6, alpha=0.6)
+        ax.set_facecolor("white")
+        fig.patch.set_facecolor("white")
+
+        step = max(1, int(len(tick_labels) / 10)) if len(tick_labels) > 10 else 1
+        ax.set_xticks(x[::step])
+        ax.set_xticklabels(tick_labels[::step], rotation=45, ha="right", fontsize=7)
+        ax.tick_params(axis="y", labelsize=7)
+        ax.set_ylabel("% semanal", fontsize=8)
+
+        fig.tight_layout()
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format="png", dpi=200)
+        plt.close(fig)
+
+        return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("utf-8")
+    except Exception:
+        logger.exception("Erro ao gerar gráfico de barras semanais", exc_info=True)
+        raise
+
+
 def _apply_market_filters(
     frame: pd.DataFrame,
     tf_key: str,
@@ -1100,10 +1196,31 @@ class ChartGenerator:
             return HEIGHT_BY_TF[timeframe.lower()]
         return fallback
 
+    @staticmethod
+    def render_base100_comparison(
+        castling: Sequence[float],
+        ibov: Sequence[float],
+        labels: Optional[Sequence[str]] = None,
+        width: int = DEFAULT_WIDTH,
+        height: int = 320,
+    ) -> str:
+        return render_base100_comparison_base64(castling, ibov, labels=labels, width=width, height=height)
+
+    @staticmethod
+    def render_weekly_returns(
+        weekly_returns: Sequence[float],
+        labels: Optional[Sequence[str]] = None,
+        width: int = DEFAULT_WIDTH,
+        height: int = 280,
+    ) -> str:
+        return render_weekly_returns_bars_base64(weekly_returns, labels=labels, width=width, height=height)
+
 
 __all__ = [
     "ChartGenerator",
     "prepare_ohlc_dataframe",
     "render_price_chart_base64",
+    "render_base100_comparison_base64",
+    "render_weekly_returns_bars_base64",
     "format_timeframe_label",
 ] 

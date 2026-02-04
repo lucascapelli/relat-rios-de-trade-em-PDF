@@ -1,0 +1,33 @@
+<section class="pdf-page disclaimer-page">
+    <header class="section-header">
+        <h2>Disclaimer & Institucional</h2>
+    </header>
+
+    <section class="about">
+        <h4>Quem Somos</h4>
+        <p>Castling é o roque: defesa e ataque em um só movimento. Estratégia disciplinada, com foco em gestão de risco.</p>
+    </section>
+
+    <section class="legal">
+        <h4>Isenção de Responsabilidade</h4>
+        <p>{{ disclaimer_text }}</p>
+    </section>
+
+    <section class="analyst">
+        <h4>Analista Responsável</h4>
+        <p>{{ compliance.analyst_name }} – CNPI: {{ compliance.analyst_cnpi }}</p>
+    </section>
+
+    <section class="badges">
+        {% if identity.branding.selo_apimec_path %}
+            <img src="{{ identity.branding.selo_apimec_path }}" alt="Selo APIMEC" class="badge-img">
+        {% endif %}
+        {% if identity.branding.selo_cvm_path %}
+            <img src="{{ identity.branding.selo_cvm_path }}" alt="Selo CVM" class="badge-img">
+        {% endif %}
+    </section>
+
+    <footer class="footer-link">
+        <a href="{{ compliance.link }}">{{ compliance.link }}</a>
+    </footer>
+</section>
