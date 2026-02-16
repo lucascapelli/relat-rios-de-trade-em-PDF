@@ -1,9 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="80" height="120" viewBox="0 0 80 120">
-  <rect width="80" height="120" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 140" preserveAspectRatio="xMidYMid meet">
+  <!-- Almenas (topo) -->
   <g fill="#C9A646">
-    <rect x="30" y="20" width="20" height="60" rx="3"/>
-    <rect x="24" y="82" width="32" height="8"/>
-    <rect x="20" y="92" width="40" height="8"/>
-    <rect x="16" y="102" width="48" height="6"/>
+    <!-- 3 retângulos alinhados e centrados no topo -->
+    <rect x="6" y="12" width="12" height="18"/>
+    <rect x="24" y="8" width="12" height="22"/>
+    <rect x="42" y="12" width="12" height="18"/>
+    
+    <!-- Barra que conecta as almenas -->
+    <rect x="6" y="32" width="48" height="4"/>
+    
+    <!-- Corpo principal da torre -->
+    <rect x="12" y="38" width="36" height="52" rx="2"/>
+    
+    <!-- Detalhes laterais (sombra) -->
+    <rect x="10" y="42" width="2" height="45" fill="#A68A3F" opacity="0.7"/>
+    
+    <!-- Base da torre em camadas -->
+    <rect x="10" y="92" width="40" height="6" rx="1"/>
+    <rect x="6" y="100" width="48" height="5" rx="1"/>
+    <rect x="2" y="107" width="56" height="4" rx="1"/>
   </g>
 </svg>

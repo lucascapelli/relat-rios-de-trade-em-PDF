@@ -10,7 +10,6 @@ class NovaOperacaoManager {
     init() {
         console.log('NovaOperacaoManager init() called');
         this.setupModeSelector();
-        this.setupMainAssetShortcuts();
         this.setupSwingTrade();
         this.setupDayTrade();
         this.setDefaultDates();
@@ -23,23 +22,6 @@ class NovaOperacaoManager {
         elements.forEach(id => {
             const el = document.getElementById(id);
             if (el && !el.value) el.value = today;
-        });
-    }
-
-    setupMainAssetShortcuts() {
-        const buttons = document.querySelectorAll('.main-asset-btn');
-        buttons.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const symbol = btn.getAttribute('data-symbol');
-                const swingField = document.getElementById('swing-symbol');
-                if (swingField) {
-                    swingField.value = symbol;
-                    this.updateSwingPreview();
-                }
-                const dtField = document.getElementById('dt-entry-symbol');
-                if (dtField) dtField.value = symbol;
-                this.showToast(`Ativo ${symbol} aplicado ao formulário atual`, 'info');
-            });
         });
     }
 
@@ -149,8 +131,17 @@ class NovaOperacaoManager {
                     'MILHO': ['CCMFUT', 'CCM1!', 'CCMQ24', 'CCMV24'],
                     'CUSTOM': []
                 };
-                function renderShortcuts(classe) {
-                    const ativos = shortcuts[classe] || [];
+                const self = this;
+                const renderShortcuts = (classe) => {
+                    let ativos = [];
+                    if (classe === 'ALL') {
+                        // Combina todos os ativos de todas as classes
+                        Object.values(shortcuts).forEach(arr => {
+                            ativos = ativos.concat(arr);
+                        });
+                    } else {
+                        ativos = shortcuts[classe] || [];
+                    }
                     if (ativos.length === 0) {
                         assetShortcutsDiv.innerHTML = '';
                         return;
@@ -159,18 +150,16 @@ class NovaOperacaoManager {
                     assetShortcutsDiv.querySelectorAll('.asset-shortcut-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             document.getElementById('swing-symbol').value = btn.textContent;
-                            this.updateSwingPreview();
+                            self.updateSwingPreview();
                         });
                     });
                 }
                 assetClassSelect.addEventListener('change', (e) => {
                     renderShortcuts(e.target.value);
                 });
-                // Render inicial se não for ALL
-                if (assetClassSelect.value && assetClassSelect.value !== 'ALL') {
+                // Render inicial
+                if (assetClassSelect.value) {
                     renderShortcuts(assetClassSelect.value);
-                } else {
-                    assetShortcutsDiv.innerHTML = '';
                 }
             }
         }, 0);

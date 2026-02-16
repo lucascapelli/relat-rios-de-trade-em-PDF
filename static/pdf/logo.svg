@@ -1,9 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120" preserveAspectRatio="xMidYMid meet">
-  <rect width="320" height="120" fill="none"/>
+  <!-- Torre de xadrez -->
   <g fill="#C9A646">
-    <rect x="24" y="24" width="16" height="56" rx="2"/>
-    <rect x="20" y="80" width="24" height="8"/>
-    <rect x="16" y="90" width="32" height="6"/>
+    <!-- Almenas (topo) -->
+    <rect x="10" y="20" width="10" height="15"/>
+    <rect x="24" y="16" width="10" height="19"/>
+    <rect x="38" y="20" width="10" height="15"/>
+    
+    <!-- Barra que conecta as almenas -->
+    <rect x="10" y="37" width="38" height="3"/>
+    
+    <!-- Corpo principal da torre -->
+    <rect x="14" y="42" width="30" height="42" rx="2"/>
+    
+    <!-- Sombra lateral -->
+    <rect x="12" y="46" width="1.5" height="35" fill="#A68A3F" opacity="0.7"/>
+    
+    <!-- Base em camadas -->
+    <rect x="12" y="86" width="34" height="5" rx="1"/>
+    <rect x="8" y="93" width="42" height="4" rx="1"/>
+    <rect x="4" y="99" width="50" height="3" rx="1"/>
   </g>
-  <text x="70" y="60" font-family="Segoe UI, Arial, sans-serif" font-size="36" fill="#C9A646">Castling.me</text>
+  
+  <!-- Texto "Castling.me" -->
+  <text x="70" y="65" font-family="Segoe UI, Arial, sans-serif" font-size="36" font-weight="500" fill="#C9A646">Castling.me</text>
 </svg>

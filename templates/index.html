@@ -21,126 +21,14 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     
     <style>
-        /* Estilos inline para garantir carregamento imediato */
-        :root {
-            --primary-color: #2c3e50;
-            --secondary-color: #3498db;
-            --success-color: #27ae60;
-            --danger-color: #e74c3c;
-            --warning-color: #f39c12;
-            --light-bg: #f8f9fa;
-            --dark-bg: #2c3e50;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--light-bg);
-            color: #333;
-        }
-        
-        .navbar-brand {
-            font-weight: bold;
-            color: var(--primary-color) !important;
-        }
-
-        /* Navbar colors to keep text visible on white background */
-        .navbar {
-            --bs-navbar-color: var(--primary-color);
-            --bs-navbar-hover-color: var(--secondary-color);
-            --bs-navbar-active-color: var(--secondary-color);
-            --bs-navbar-brand-color: var(--primary-color);
-            --bs-navbar-brand-hover-color: var(--secondary-color);
-            --bs-navbar-toggler-border-color: rgba(44, 62, 80, 0.35);
-            --bs-navbar-toggler-icon-bg: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba(44, 62, 80, 0.75)' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
-        }
-        .navbar .nav-link,
-        .navbar .dropdown-toggle,
-        .navbar .dropdown-item {
-            color: var(--primary-color) !important;
-        }
-        .navbar .nav-link.active,
-        .navbar .nav-link:hover,
-        .navbar .dropdown-item:hover {
-            color: var(--secondary-color) !important;
-        }
-        
-        .stock-card {
-            transition: transform 0.3s, box-shadow 0.3s;
-            border: none;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        
-        .stock-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1) !important;
-        }
-        
-        .positive {
-            color: var(--success-color) !important;
-        }
-        
-        .negative {
-            color: var(--danger-color) !important;
-        }
-        
-        .chart-container {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        }
-        
-        .timeframe-btn.active {
-            background-color: var(--secondary-color) !important;
-            color: white !important;
-            border-color: var(--secondary-color) !important;
-        }
-        
-        .operation-card {
-            border-left: 4px solid;
-            transition: all 0.3s;
-        }
-        
-        .operation-card.aberta {
-            border-left-color: var(--warning-color);
-        }
-        
-        .operation-card.alvo {
-            border-left-color: var(--success-color);
-        }
-        
-        .operation-card.stop {
-            border-left-color: var(--danger-color);
-        }
-        
-        .modal-content {
-            border-radius: 15px;
-            border: none;
-        }
-        
-        .form-control:focus, .form-select:focus {
-            border-color: var(--secondary-color);
-            box-shadow: 0 0 0 0.25rem rgba(52, 152, 219, 0.25);
-        }
-        
-        .btn-primary {
-            background-color: var(--secondary-color);
-            border-color: var(--secondary-color);
-        }
-        
-        .btn-primary:hover {
-            background-color: #2980b9;
-            border-color: #2980b9;
-        }
-        
+        /* Loading overlay & spinner */
         #loading-overlay {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.95);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -151,8 +39,8 @@
         .spinner {
             width: 50px;
             height: 50px;
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid var(--secondary-color);
+            border: 5px solid var(--color-border);
+            border-top: 5px solid var(--color-secondary);
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
@@ -162,6 +50,7 @@
             100% { transform: rotate(360deg); }
         }
         
+        /* Toast container */
         .toast {
             position: fixed;
             bottom: 20px;
@@ -170,13 +59,14 @@
             min-width: 300px;
         }
 
+        /* Specific component styles */
         .list-group-item[data-symbol] {
             cursor: pointer;
         }
 
         .list-group-item.active-symbol {
-            background: rgba(52, 152, 219, 0.15);
-            border-left: 3px solid var(--secondary-color);
+            background: rgba(30, 58, 95, 0.1);
+            border-left: 3px solid var(--color-secondary);
         }
 
         .symbol-toggle-group .symbol-toggle {
@@ -184,9 +74,9 @@
         }
 
         .symbol-toggle-group .symbol-toggle.active {
-            background-color: var(--secondary-color);
+            background-color: var(--color-secondary);
             color: #fff;
-            border-color: var(--secondary-color);
+            border-color: var(--color-secondary);
         }
 
         .dashboard-sidebar .card {
@@ -260,64 +150,62 @@
     <div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3"></div>
 
     <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+    <!-- Navigation Bar - Professional Trading Dashboard -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#">
+            <!-- Brand -->
+            <a class="navbar-brand" href="#" title="Trading System Dashboard">
                 <i class="fas fa-chart-line me-2"></i>
-                <span class="fw-bold">Trading System</span>
+                <span class="fw-bold">Relatórios Trade</span>
             </a>
             
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <!-- Toggle Button for Mobile -->
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
             
+            <!-- Navbar Menu -->
             <div class="collapse navbar-collapse" id="navbarNav">
+                <!-- Left Navigation -->
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link active" href="#" data-section="dashboard">
+                        <a class="nav-link active" href="#" data-section="dashboard" title="Voltar ao Dashboard">
                             <i class="fas fa-tachometer-alt me-1"></i> Dashboard
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#" data-section="chart">
+                        <a class="nav-link" href="#" data-section="chart" title="Visualizar Gráficos">
                             <i class="fas fa-chart-candlestick me-1"></i> Gráfico
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#" data-section="operation">
+                        <a class="nav-link" href="#" data-section="operation" title="Registrar Operação">
                             <i class="fas fa-exchange-alt me-1"></i> Nova Operação
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#" data-section="portfolio">
+                        <a class="nav-link" href="#" data-section="portfolio" title="Gerenciar Carteiras">
                             <i class="fas fa-briefcase me-1"></i> Carteiras
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#" data-section="history">
+                        <a class="nav-link" href="#" data-section="history" title="Histórico de Operações">
                             <i class="fas fa-history me-1"></i> Histórico
                         </a>
                     </li>
                 </ul>
                 
-                <div class="d-flex align-items-center">
-                    <div class="input-group me-3" style="max-width: 300px;">
-                        <input type="text" id="search-input" class="form-control form-control-sm" 
-                               placeholder="Buscar ativo (ex: PETR4)">
-                        <button class="btn btn-outline-primary btn-sm" id="search-btn">
-                            <i class="fas fa-search"></i>
-                        </button>
-                    </div>
-                    
+                <!-- Right Navigation - User Menu -->
+                <div class="d-flex align-items-center ms-auto">
                     <div class="dropdown">
-                        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" 
-                                data-bs-toggle="dropdown">
-                            <i class="fas fa-user-circle me-1"></i> Usuário
+                        <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" 
+                                data-bs-toggle="dropdown" aria-expanded="false" title="Menu do Usuário">
+                            <i class="fas fa-user-circle me-2"></i> Usuário
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="#"><i class="fas fa-cog me-2"></i> Configurações</a></li>
+                            <li><a class="dropdown-item" href="#" title="Abrir Configurações"><i class="fas fa-cog me-2"></i> Configurações</a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="#"><i class="fas fa-sign-out-alt me-2"></i> Sair</a></li>
+                            <li><a class="dropdown-item" href="#" title="Fazer Logout"><i class="fas fa-sign-out-alt me-2"></i> Sair</a></li>
                         </ul>
                     </div>
                 </div>
@@ -333,7 +221,7 @@
                 <!-- Sidebar Column -->
                 <div class="column-wrapper col-12 col-lg-4 col-xl-3 dashboard-sidebar pe-lg-3">
                     <div class="card stock-card shadow-sm mb-4">
-                        <div class="card-header bg-primary text-white">
+                        <div class="card-header">
                             <h6 class="mb-0"><i class="fas fa-star me-2"></i>Ativos Principais</h6>
                         </div>
                         <div class="card-body p-0">
@@ -397,7 +285,7 @@
                     </div>
 
                     <!-- Market News -->
-                    <div class="card shadow-sm compact-card">
+                    <div class="card shadow-sm">
                         <div class="card-body">
                             <h6 class="card-title mb-3">
                                 <i class="fas fa-newspaper me-2"></i>Notícias do Mercado
@@ -439,8 +327,8 @@
                         <div id="main-chart" style="height: 520px;"></div>
                     </div>
 
-                    <div class="card shadow-sm compact-card h-100">
-                        <div class="card-header bg-dark text-white">
+                    <div class="card shadow-sm" id="recent-ops-card">
+                        <div class="card-header">
                             <h6 class="mb-0"><i class="fas fa-clock me-2"></i>Operações Recentes</h6>
                         </div>
                         <div class="card-body p-0 d-flex flex-column">
@@ -456,7 +344,7 @@
         <!-- Portfolio Section (Carteiras Semanais v2) -->
         <section id="portfolio-section" class="section" style="display: none;">
             <div class="card shadow-sm">
-                <div class="card-header bg-white d-flex flex-wrap align-items-center justify-content-between">
+                <div class="card-header d-flex flex-wrap align-items-center justify-content-between">
                     <div>
                         <h5 class="mb-0"><i class="fas fa-briefcase me-2"></i>Carteiras Semanais</h5>
                         <small class="text-muted">Máximo de 5 ativos, preços puxados do mercado automaticamente.</small>
@@ -547,11 +435,30 @@
                                             <th>Período</th>
                                             <th>Ativos</th>
                                             <th>Data criação</th>
+                                            <th>Ações</th>
                                         </tr>
                                     </thead>
                                     <tbody id="pf-history-tbody"></tbody>
                                 </table>
                             </div>
+                            <!-- Paginação -->
+                            <nav class="mt-3" id="pf-pagination-nav" style="display: none;">
+                                <ul class="pagination pagination-sm justify-content-center mb-0">
+                                    <li class="page-item" id="pf-prev-page">
+                                        <a class="page-link" href="#" aria-label="Anterior">
+                                            <span aria-hidden="true">&laquo;</span>
+                                        </a>
+                                    </li>
+                                    <li class="page-item" id="pf-page-info">
+                                        <span class="page-link">Página 1</span>
+                                    </li>
+                                    <li class="page-item" id="pf-next-page">
+                                        <a class="page-link" href="#" aria-label="Próxima">
+                                            <span aria-hidden="true">&raquo;</span>
+                                        </a>
+                                    </li>
+                                </ul>
+                            </nav>
                         </div>
                     </div>
                 </div>
@@ -612,7 +519,7 @@
                 <div class="col-md-3">
                     <!-- Quick Trade Panel -->
                     <div class="card shadow-sm mb-4">
-                        <div class="card-header bg-success text-white">
+                        <div class="card-header">
                             <h6 class="mb-0"><i class="fas fa-bolt me-2"></i>Operação Rápida</h6>
                         </div>
                         <div class="card-body">
@@ -677,12 +584,27 @@
         <!-- History Section -->
         <section id="history-section" class="section" style="display: none;">
             <div class="card shadow-sm">
-                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="fas fa-history me-2"></i>Histórico de Operações</h5>
-                    <button class="btn btn-sm btn-light" id="refresh-history-btn">
-                        <i class="fas fa-sync-alt"></i>
+                    <button class="btn btn-sm btn-outline-secondary" id="refresh-history-btn" title="Atualizar histórico">
+                        <i class="fas fa-sync-alt"></i> Atualizar
                     </button>
                 </div>
+
+                <!-- Filtros -->
+                <div class="card-body border-bottom">
+                    <div class="btn-group" role="group" id="history-filter-group">
+                        <input type="radio" class="btn-check" name="history-filter" id="filter-all" value="all" checked>
+                        <label class="btn btn-outline-secondary btn-sm" for="filter-all">Tudo</label>
+
+                        <input type="radio" class="btn-check" name="history-filter" id="filter-swing" value="swing">
+                        <label class="btn btn-outline-primary btn-sm" for="filter-swing">Swing Trade</label>
+
+                        <input type="radio" class="btn-check" name="history-filter" id="filter-daytrade" value="daytrade">
+                        <label class="btn btn-outline-success btn-sm" for="filter-daytrade">Day Trade</label>
+                    </div>
+                </div>
+
                 <div class="card-body p-0 d-none d-md-block">
                     <div class="table-responsive">
                         <table class="table table-hover mb-0 history-table">
@@ -706,6 +628,25 @@
                             </tbody>
                         </table>
                     </div>
+
+                    <!-- Paginação Desktop -->
+                    <nav class="mt-3" id="history-pagination-nav" style="display: none;">
+                        <ul class="pagination pagination-sm justify-content-center mb-0">
+                            <li class="page-item" id="history-prev-page">
+                                <a class="page-link" href="#" aria-label="Anterior">
+                                    <span aria-hidden="true">&laquo;</span>
+                                </a>
+                            </li>
+                            <li class="page-item" id="history-page-info">
+                                <span class="page-link">Página 1</span>
+                            </li>
+                            <li class="page-item" id="history-next-page">
+                                <a class="page-link" href="#" aria-label="Próxima">
+                                    <span aria-hidden="true">&raquo;</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </nav>
                 </div>
 
                 <!-- Mobile-friendly cards -->
@@ -713,12 +654,31 @@
                     <div id="history-cards" class="d-flex flex-column gap-2">
                         <!-- Mobile cards injected via JS -->
                     </div>
+
+                    <!-- Paginação Mobile -->
+                    <nav class="mt-3" id="history-pagination-mobile" style="display: none;">
+                        <ul class="pagination pagination-sm justify-content-center mb-0">
+                            <li class="page-item" id="history-mobile-prev-page">
+                                <a class="page-link" href="#" aria-label="Anterior">
+                                    <span aria-hidden="true">&laquo;</span>
+                                </a>
+                            </li>
+                            <li class="page-item" id="history-mobile-page-info">
+                                <span class="page-link">Página 1</span>
+                            </li>
+                            <li class="page-item" id="history-mobile-next-page">
+                                <a class="page-link" href="#" aria-label="Próxima">
+                                    <span aria-hidden="true">&raquo;</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </nav>
                 </div>
             </div>
             
             <!-- Statistics -->
             <div class="row mt-4">
-                <div class="col-md-3">
+                <div class="col-md-4">
                     <div class="card text-white bg-success shadow-sm">
                         <div class="card-body">
                             <h6 class="card-title">Operações Bem-sucedidas</h6>
@@ -730,7 +690,7 @@
                     </div>
                 </div>
                 
-                <div class="col-md-3">
+                <div class="col-md-4">
                     <div class="card text-white bg-danger shadow-sm">
                         <div class="card-body">
                             <h6 class="card-title">Stops Acionados</h6>
@@ -742,20 +702,20 @@
                     </div>
                 </div>
                 
-                <div class="col-md-3">
-                    <div class="card text-white bg-warning shadow-sm">
+                <div class="col-md-4">
+                    <div class="card text-white bg-info shadow-sm" id="open-count-card" style="display: none;">
                         <div class="card-body">
-                            <h6 class="card-title">Em Aberto</h6>
+                            <h6 class="card-title">Operações em Andamento</h6>
                             <div class="d-flex justify-content-between align-items-center">
                                 <h2 class="mb-0" id="open-count">0</h2>
-                                <i class="fas fa-clock fa-2x opacity-50"></i>
+                                <i class="fas fa-hourglass-half fa-2x opacity-50"></i>
                             </div>
                         </div>
                     </div>
                 </div>
                 
-                <div class="col-md-3">
-                    <div class="card text-white bg-info shadow-sm">
+                <div class="col-md-4">
+                    <div class="card text-white bg-primary shadow-sm">
                         <div class="card-body">
                             <h6 class="card-title">Taxa de Acerto</h6>
                             <div class="d-flex justify-content-between align-items-center">
@@ -791,15 +751,15 @@
     </div>
 
     <!-- Footer -->
-    <footer class="mt-5 py-3 bg-white border-top">
+    <footer class="mt-5 py-4 border-top" style="background: linear-gradient(135deg, var(--color-primary-dark) 0%, var(--color-secondary) 100%); color: white;">
         <div class="container-fluid">
             <div class="row align-items-center">
                 <div class="col-md-6">
-                    <span class="text-muted">© 2024 Trading System. Dados fornecidos por Yahoo Finance.</span>
+                    <span class="text-light">© 2024 Relatórios Trade. Dados fornecidos por Yahoo Finance.</span>
                 </div>
                 <div class="col-md-6 text-end">
-                    <span class="text-muted" id="connection-status">
-                        <i class="fas fa-circle text-success me-1"></i>Conectado
+                    <span class="text-light" id="connection-status">
+                        <i class="fas fa-circle text-success me-2" style="animation: pulse 2s infinite;"></i>Sistema Conectado
                     </span>
                 </div>
             </div>

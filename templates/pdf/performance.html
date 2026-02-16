@@ -16,10 +16,15 @@
                     <tr><th colspan="2">ESTATÍSTICA</th></tr>
                 </thead>
                 <tbody>
+                    <tr><td>N. de finalizados</td><td>{{ performance.num_finalized }}</td></tr>
+                    <tr><td>N. Castling > IBOV</td><td>{{ performance.num_castling_greater_ibov }}</td></tr>
+                    <tr><td>N. Castling > 0</td><td>{{ performance.num_castling_positive }}</td></tr>
+                    <tr><td>N. Castling < 0</td><td>{{ performance.num_castling_negative }}</td></tr>
                     <tr><td>Taxa de acerto</td><td>{{ performance.win_rate }}%</td></tr>
-                    <tr><td>Ganho médio</td><td>{{ performance.avg_gain }}%</td></tr>
-                    <tr><td>Perda média</td><td>{{ performance.avg_loss }}%</td></tr>
-                    <tr><td>Vol. anualizada</td><td>{{ performance.vol_annualized }}%</td></tr>
+                    <tr><td>Média</td><td>{{ performance.avg_overall }}%</td></tr>
+                    <tr><td>Média dos ganhos</td><td>{{ performance.avg_gain }}%</td></tr>
+                    <tr><td>Média das perdas</td><td>{{ performance.avg_loss }}%</td></tr>
+                    <tr><td>Volatilidade Anualizada</td><td>{{ performance.vol_annualized }}%</td></tr>
                 </tbody>
             </table>
             <table class="stats-table">
@@ -27,10 +32,13 @@
                     <tr><th colspan="2">PERFORMANCE</th></tr>
                 </thead>
                 <tbody>
-                    <tr><td>Sharpe</td><td>{{ performance.sharpe }}</td></tr>
-                    <tr><td>Alpha vs IBOV</td><td>{{ performance.alpha_ibov }}%</td></tr>
-                    <tr><td>Fator de lucro</td><td>{{ performance.profit_factor }}</td></tr>
-                    <tr><td>Retorno anualizado</td><td>{{ performance.return_annualized }}%</td></tr>
+                    <tr><td>Risco/Retorno</td><td>{{ performance.risk_return }}</td></tr>
+                    <tr><td>Retorno Acumulado</td><td>{{ performance.return_accumulated }}%</td></tr>
+                    <tr><td>Retorno IBOV</td><td>{{ performance.return_ibov }}%</td></tr>
+                    <tr><td>Alpha P.P.</td><td>{{ performance.alpha_pp }}%</td></tr>
+                    <tr><td>Razão de Sharpe</td><td>{{ performance.sharpe }}</td></tr>
+                    <tr><td>Fator de Lucro</td><td>{{ performance.profit_factor }}</td></tr>
+                    <tr><td>Retorno Anualizado</td><td>{{ performance.return_annualized }}%</td></tr>
                 </tbody>
             </table>
         </div>

@@ -134,14 +134,24 @@ def build_pdf_payload_from_weekly_portfolio(
 
     perf = performance_data or portfolio_record.get("performance") or {}
     performance = PerformanceStats(
-        win_rate=float(perf.get("win_rate", 77.8)),
+        # ESTATÍSTICA
+        num_finalized=int(perf.get("num_finalized", 18)),
+        num_castling_greater_ibov=int(perf.get("num_castling_greater_ibov", 9)),
+        num_castling_positive=int(perf.get("num_castling_positive", 14)),
+        num_castling_negative=int(perf.get("num_castling_negative", 4)),
+        win_rate=float(perf.get("win_rate", 77.78)),
+        avg_overall=float(perf.get("avg_overall", 0.93)),
         avg_gain=float(perf.get("avg_gain", 1.65)),
         avg_loss=float(perf.get("avg_loss", -1.59)),
         vol_annualized=float(perf.get("vol_annualized", 11.27)),
+        # PERFORMANCE
+        risk_return=float(perf.get("risk_return", 5.83)),
+        return_accumulated=float(perf.get("return_accumulated", 19.10)),
+        return_ibov=float(perf.get("return_ibov", 16.53)),
+        alpha_pp=float(perf.get("alpha_pp", 2.57)),
         sharpe=float(perf.get("sharpe", 3.07)),
-        alpha_ibov=float(perf.get("alpha_ibov", 2.57)),
         profit_factor=float(perf.get("profit_factor", 3.65)),
-        return_annualized=float(perf.get("return_annualized", 6.56)),
+        return_annualized=float(perf.get("return_annualized", 65.69)),
     )
 
     series_cfg = series_data or portfolio_record.get("series") or {}
@@ -149,6 +159,7 @@ def build_pdf_payload_from_weekly_portfolio(
         cumulative_castling=series_cfg.get("cumulative_castling", []) or [],
         cumulative_ibov=series_cfg.get("cumulative_ibov", []) or [],
         weekly_returns=series_cfg.get("weekly_returns", []) or [],
+        weekly_returns_ibov=series_cfg.get("weekly_returns_ibov", []) or [],
         weekly_labels=series_cfg.get("weekly_labels", []) or [],
         cumulative_labels=series_cfg.get("cumulative_labels", []) or [],
     )
@@ -159,7 +170,16 @@ def build_pdf_payload_from_weekly_portfolio(
         series.cumulative_labels = demo_labels
     if not series.weekly_returns:
         series.weekly_returns = [0.6, -0.2, 1.1, 0.4, 0.9, -0.3]
-        series.weekly_labels = series.weekly_labels or [f"S{i}" for i in range(1, len(series.weekly_returns) + 1)]
+        # Gera datas das últimas 12 semanas a partir de hoje
+        from datetime import datetime, timedelta
+        today = datetime.now()
+        week_labels = []
+        for i in range(len(series.weekly_returns) - 1, -1, -1):
+            week_date = today - timedelta(weeks=i)
+            week_labels.append(week_date.strftime("%d/%m"))
+        series.weekly_labels = series.weekly_labels or week_labels
+    if not series.weekly_returns_ibov:
+        series.weekly_returns_ibov = [0.3, -0.1, 0.8, 0.2, 0.5, -0.2]
 
     comp_cfg = compliance_data or portfolio_record.get("compliance") or {}
     compliance = ComplianceData(
@@ -255,6 +275,7 @@ class PdfReportBuilder:
                 series.weekly_chart = ChartGenerator.render_weekly_returns(
                     series.weekly_returns,
                     labels=getattr(series, "weekly_labels", None) or None,
+                    weekly_returns_ibov=getattr(series, "weekly_returns_ibov", None) or None,
                     width=820,
                     height=280,
                 )

@@ -49,6 +49,9 @@ build/
 # Logs
 *.log
 
+# Telegram Bot (configurações sensíveis)
+telegram_bot.py
+
 # PyInstaller
 *.manifest
 *.spec

@@ -65,12 +65,23 @@ class PortfolioSection:
 
 @dataclass
 class PerformanceStats:
+    # ESTATÍSTICA
+    num_finalized: int
+    num_castling_greater_ibov: int
+    num_castling_positive: int
+    num_castling_negative: int
     win_rate: float
+    avg_overall: float
     avg_gain: float
     avg_loss: float
     vol_annualized: float
+    
+    # PERFORMANCE
+    risk_return: float
+    return_accumulated: float
+    return_ibov: float
+    alpha_pp: float
     sharpe: float
-    alpha_ibov: float
     profit_factor: float
     return_annualized: float
 
@@ -79,8 +90,9 @@ class PerformanceStats:
 class SeriesData:
     cumulative_castling: List[float]
     cumulative_ibov: List[float]
-    weekly_returns: List[float]  # últimas 12 semanas
-    weekly_labels: List[str]     # datas/labels das 12 semanas
+    weekly_returns: List[float]  # últimas 12 semanas Castling
+    weekly_returns_ibov: List[float] = field(default_factory=list)  # últimas 12 semanas IBOV
+    weekly_labels: List[str] = field(default_factory=list)     # datas/labels das 12 semanas
     cumulative_labels: List[str] = field(default_factory=list)
     base100_chart: Optional[str] = None
     weekly_chart: Optional[str] = None

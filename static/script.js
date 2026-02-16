@@ -50,6 +50,20 @@ class TradingApp {
         this.lastDataSource = null;
         this.portfolioUI = null;
         
+        // Paginação de Histórico
+        this.historyCurrentPage = 1;
+        this.historyItemsPerPage = 10;
+        this.historyAllOperations = [];
+        this.historyCurrentFilter = 'all';
+        this.historyPaginationNav = document.getElementById('history-pagination-nav');
+        this.historyPaginationMobile = document.getElementById('history-pagination-mobile');
+        this.historyPrevPageBtn = document.getElementById('history-prev-page');
+        this.historyNextPageBtn = document.getElementById('history-next-page');
+        this.historyPageInfo = document.getElementById('history-page-info');
+        this.historyMobilePrevPageBtn = document.getElementById('history-mobile-prev-page');
+        this.historyMobileNextPageBtn = document.getElementById('history-mobile-next-page');
+        this.historyMobilePageInfo = document.getElementById('history-mobile-page-info');
+        
         this.init();
     }
     
@@ -852,8 +866,11 @@ class TradingApp {
         try {
             const response = await fetch('/api/history');
             this.operations = await response.json();
+            this.historyAllOperations = this.operations.filter(op => op.source !== 'operation');
+            this.historyCurrentPage = 1;
             
-            this.renderOperationsTable();
+            this._renderHistoryPage();
+            this._updateHistoryPaginationControls();
             this.updateStatistics();
             
         } catch (error) {
@@ -861,154 +878,235 @@ class TradingApp {
             this.showToast('Erro ao carregar histórico de operações', 'danger');
         }
     }
-    
-    renderOperationsTable() {
+
+    _renderHistoryPage() {
+        // Aplicar filtro
+        const filtered = this.historyAllOperations.filter(op => {
+            if (this.historyCurrentFilter === 'all') return true;
+            const rowType = op.source === 'swing_trade' ? 'swing' : (op.source === 'daytrade' ? 'daytrade' : null);
+            return rowType === this.historyCurrentFilter;
+        });
+
+        const startIdx = (this.historyCurrentPage - 1) * this.historyItemsPerPage;
+        const endIdx = startIdx + this.historyItemsPerPage;
+        const pageItems = filtered.slice(startIdx, endIdx);
+
+        // Renderizar tabela
         const tbody = document.getElementById('history-table-body');
-        tbody.innerHTML = '';
+        if (tbody) {
+            tbody.innerHTML = '';
+            pageItems.forEach(op => {
+                const row = document.createElement('tr');
+                const statusClass = (op.status || '').toLowerCase().replace(/\s+/g, '-');
+                const source = op.source || 'operation';
+                let filterType = 'all';
+                if (source === 'swing_trade') {
+                    filterType = 'swing';
+                } else if (source === 'daytrade') {
+                    filterType = 'daytrade';
+                }
+                row.className = `operation-card ${statusClass}`;
+                row.setAttribute('data-filter-type', filterType);
 
-        const cardsContainer = document.getElementById('history-cards');
-        if (cardsContainer) {
-            cardsContainer.innerHTML = '';
-        }
-        
-        this.operations.forEach(op => {
-            const row = document.createElement('tr');
-            const statusClass = (op.status || '').toLowerCase().replace(/\s+/g, '-');
-            row.className = `operation-card ${statusClass}`;
-
-            const pdfUrl = this.buildPdfUrl(op.pdf_url || op.pdf_path);
-
-            const symbol = op.symbol || '-';
-            const faixa = (op.entrada_min !== null && op.entrada_min !== undefined &&
-                           op.entrada_max !== null && op.entrada_max !== undefined)
-                ? `${this.formatCurrency(Math.min(op.entrada_min, op.entrada_max))} · ${this.formatCurrency(Math.max(op.entrada_min, op.entrada_max))}`
-                : '-';
-
-            const parcialInfo = (op.parcial_preco !== null && op.parcial_preco !== undefined)
-                ? `${this.formatCurrency(op.parcial_preco)} | ${this.formatTicks(op.parcial_pontos)}`
-                : '-';
-
-            const alvoInfo = `${this.formatCurrency(op.alvo)} | ${this.formatTicks(op.pontos_alvo)}`;
-            const stopInfo = `${this.formatCurrency(op.stop)} | ${this.formatTicks(op.pontos_stop)}`;
-            const createdAt = op.created_at ? new Date(op.created_at).toLocaleDateString('pt-BR') : '-';
-            const pdfIcon = pdfUrl ? '<i class="fas fa-file-pdf ms-1 text-danger" title="Possui PDF"></i>' : '';
-
-            row.innerHTML = `
-                <td>${op.id}</td>
-                <td>
-                    <strong>${symbol}</strong>
-                    ${pdfIcon}
-                </td>
-                <td>
-                    <span class="badge ${(op.tipo || '').toUpperCase() === 'COMPRA' ? 'bg-success' : 'bg-danger'}">
-                        ${(op.tipo || '').toUpperCase()}
-                    </span>
-                </td>
-                <td>${this.formatCurrency(op.entrada)}</td>
-                <td>${faixa}</td>
-                <td>${parcialInfo}</td>
-                <td>${alvoInfo}</td>
-                <td>${stopInfo}</td>
-                <td>${op.quantidade || 0}</td>
-                <td>
-                    <span class="badge ${this.getStatusBadgeClass(op.status)}">
-                        ${op.status || 'ABERTA'}
-                    </span>
-                </td>
-                <td>${createdAt}</td>
-                <td>
-                    <button class="btn btn-sm btn-outline-primary view-operation" data-id="${op.id}">
-                        <i class="fas fa-eye"></i>
-                    </button>
-                    ${pdfUrl ? `
-                    <a href="${pdfUrl}" class="btn btn-sm btn-outline-danger" target="_blank">
-                        <i class="fas fa-file-pdf"></i>
-                    </a>
-                    ` : ''}
-                </td>
-            `;
-            tbody.appendChild(row);
-
-            if (cardsContainer) {
-                const card = document.createElement('div');
-                card.className = 'card shadow-sm';
-
-                const directionBadge = (op.tipo || '').toUpperCase() === 'COMPRA'
-                    ? '<span class="badge bg-success">COMPRA</span>'
-                    : '<span class="badge bg-danger">VENDA</span>';
-                const statusBadge = `<span class="badge ${this.getStatusBadgeClass(op.status)}">${op.status || 'ABERTA'}</span>`;
+                const pdfUrl = this.buildPdfUrl(op.pdf_url || op.pdf_path);
+                const symbol = op.symbol || '-';
+                const faixa = (op.entrada_min !== null && op.entrada_min !== undefined &&
+                               op.entrada_max !== null && op.entrada_max !== undefined)
+                    ? `${this.formatCurrency(Math.min(op.entrada_min, op.entrada_max))} · ${this.formatCurrency(Math.max(op.entrada_min, op.entrada_max))}`
+                    : '-';
+                const parcialInfo = (op.parcial_preco !== null && op.parcial_preco !== undefined)
+                    ? `${this.formatCurrency(op.parcial_preco)} | ${this.formatTicks(op.parcial_pontos)}`
+                    : '-';
+                const alvoInfo = `${this.formatCurrency(op.alvo)} | ${this.formatTicks(op.pontos_alvo)}`;
+                const stopInfo = `${this.formatCurrency(op.stop)} | ${this.formatTicks(op.pontos_stop)}`;
                 const createdAt = op.created_at ? new Date(op.created_at).toLocaleDateString('pt-BR') : '-';
+                const pdfIcon = pdfUrl ? '<i class="fas fa-file-pdf ms-1 text-danger" title="Possui PDF"></i>' : '';
 
-                card.innerHTML = `
-                    <div class="card-body p-3">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <div>
-                                <div class="fw-semibold">${symbol} ${pdfIcon}</div>
-                                <div class="text-muted small">ID ${op.id} • ${createdAt}</div>
-                            </div>
-                            <div class="d-flex flex-column align-items-end gap-1">
-                                ${directionBadge}
-                                ${statusBadge}
-                            </div>
-                        </div>
-
-                        <div class="row g-2 small">
-                            <div class="col-6">
-                                <div class="text-muted">Entrada</div>
-                                <div class="fw-semibold">${this.formatCurrency(op.entrada)}</div>
-                            </div>
-                            <div class="col-6">
-                                <div class="text-muted">Faixa</div>
-                                <div class="fw-semibold">${faixa}</div>
-                            </div>
-                            <div class="col-6">
-                                <div class="text-muted">Alvo</div>
-                                <div class="fw-semibold">${alvoInfo}</div>
-                            </div>
-                            <div class="col-6">
-                                <div class="text-muted">Stop</div>
-                                <div class="fw-semibold">${stopInfo}</div>
-                            </div>
-                            <div class="col-6">
-                                <div class="text-muted">Parcial</div>
-                                <div class="fw-semibold">${parcialInfo}</div>
-                            </div>
-                            <div class="col-6">
-                                <div class="text-muted">Qtd</div>
-                                <div class="fw-semibold">${op.quantidade || 0}</div>
-                            </div>
-                        </div>
-
-                        <div class="d-flex justify-content-end gap-2 mt-3">
-                            <button class="btn btn-sm btn-outline-primary view-operation" data-id="${op.id}">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                            ${pdfUrl ? `
-                            <a href="${pdfUrl}" class="btn btn-sm btn-outline-danger" target="_blank">
-                                <i class="fas fa-file-pdf"></i>
-                            </a>
-                            ` : ''}
-                        </div>
-                    </div>
+                row.innerHTML = `
+                    <td>${op.id}</td>
+                    <td>
+                        <strong>${symbol}</strong>
+                        ${pdfIcon}
+                    </td>
+                    <td>
+                        <span class="badge ${(op.tipo || '').toUpperCase() === 'COMPRA' ? 'bg-success' : 'bg-danger'}">
+                            ${(op.tipo || '').toUpperCase()}
+                        </span>
+                    </td>
+                    <td>${this.formatCurrency(op.entrada)}</td>
+                    <td>${faixa}</td>
+                    <td>${parcialInfo}</td>
+                    <td>${alvoInfo}</td>
+                    <td>${stopInfo}</td>
+                    <td>${op.quantidade || 0}</td>
+                    <td>
+                        <span class="badge ${this.getStatusBadgeClass(op.status)}">
+                            ${op.status || 'ABERTA'}
+                        </span>
+                    </td>
+                    <td>${createdAt}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary view-operation" data-id="${op.id}">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        ${pdfUrl ? `
+                        <a href="${pdfUrl}" class="btn btn-sm btn-outline-danger" target="_blank">
+                            <i class="fas fa-file-pdf"></i>
+                        </a>
+                        ` : ''}
+                    </td>
+                    <td>${op.risco_zero_preco ? this.formatCurrency(op.risco_zero_preco) : '-'}</td>
                 `;
-
-                cardsContainer.appendChild(card);
-            }
-        });
-        
-        // Add event listeners to view buttons
-        document.querySelectorAll('.view-operation').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const opId = e.currentTarget.getAttribute('data-id');
-                this.showOperationDetails(opId);
+                tbody.appendChild(row);
             });
+
+            // Renderizar cards mobile
+            const cardsContainer = document.getElementById('history-cards');
+            if (cardsContainer) {
+                cardsContainer.innerHTML = '';
+                pageItems.forEach(op => {
+                    const card = document.createElement('div');
+                    card.className = 'card shadow-sm history-card';
+                    card.setAttribute('data-filter-type', op.source === 'swing_trade' ? 'swing' : 'daytrade');
+
+                    const pdfUrl = this.buildPdfUrl(op.pdf_url || op.pdf_path);
+                    const symbol = op.symbol || '-';
+                    const faixa = (op.entrada_min !== null && op.entrada_min !== undefined &&
+                                   op.entrada_max !== null && op.entrada_max !== undefined)
+                        ? `${this.formatCurrency(Math.min(op.entrada_min, op.entrada_max))} · ${this.formatCurrency(Math.max(op.entrada_min, op.entrada_max))}`
+                        : '-';
+                    const parcialInfo = (op.parcial_preco !== null && op.parcial_preco !== undefined)
+                        ? `${this.formatCurrency(op.parcial_preco)} | ${this.formatTicks(op.parcial_pontos)}`
+                        : '-';
+                    const alvoInfo = `${this.formatCurrency(op.alvo)} | ${this.formatTicks(op.pontos_alvo)}`;
+                    const stopInfo = `${this.formatCurrency(op.stop)} | ${this.formatTicks(op.pontos_stop)}`;
+                    const createdAt = op.created_at ? new Date(op.created_at).toLocaleDateString('pt-BR') : '-';
+                    const pdfIcon = pdfUrl ? '<i class="fas fa-file-pdf ms-1 text-danger" title="Possui PDF"></i>' : '';
+
+                    const directionBadge = (op.tipo || '').toUpperCase() === 'COMPRA'
+                        ? '<span class="badge bg-success">COMPRA</span>'
+                        : '<span class="badge bg-danger">VENDA</span>';
+                    const statusBadge = `<span class="badge ${this.getStatusBadgeClass(op.status)}">${op.status || 'ABERTA'}</span>`;
+
+                    card.innerHTML = `
+                        <div class="card-body p-3">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div>
+                                    <div class="fw-semibold">${symbol} ${pdfIcon}</div>
+                                    <div class="text-muted small">ID ${op.id} • ${createdAt}</div>
+                                </div>
+                                <div class="d-flex flex-column align-items-end gap-1">
+                                    ${directionBadge}
+                                    ${statusBadge}
+                                </div>
+                            </div>
+
+                            <div class="row g-2 small">
+                                <div class="col-6">
+                                    <div class="text-muted">Entrada</div>
+                                    <div class="fw-semibold">${this.formatCurrency(op.entrada)}</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="text-muted">Faixa</div>
+                                    <div class="fw-semibold">${faixa}</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="text-muted">Alvo</div>
+                                    <div class="fw-semibold">${alvoInfo}</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="text-muted">Stop</div>
+                                    <div class="fw-semibold">${stopInfo}</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="text-muted">Parcial</div>
+                                    <div class="fw-semibold">${parcialInfo}</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="text-muted">Qtd</div>
+                                    <div class="fw-semibold">${op.quantidade || 0}</div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex justify-content-end gap-2 mt-3">
+                                <button class="btn btn-sm btn-outline-primary view-operation" data-id="${op.id}">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                ${pdfUrl ? `
+                                <a href="${pdfUrl}" class="btn btn-sm btn-outline-danger" target="_blank">
+                                    <i class="fas fa-file-pdf"></i>
+                                </a>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `;
+                    cardsContainer.appendChild(card);
+                });
+            }
+
+            // Add event listeners to view buttons
+            document.querySelectorAll('.view-operation').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const opId = e.currentTarget.getAttribute('data-id');
+                    this.showOperationDetails(opId);
+                });
+            });
+        }
+    }
+
+    _updateHistoryPaginationControls() {
+        const maxPages = this._getHistoryMaxPages();
+        const filtered = this.historyAllOperations.filter(op => {
+            if (this.historyCurrentFilter === 'all') return true;
+            const rowType = op.source === 'swing_trade' ? 'swing' : (op.source === 'daytrade' ? 'daytrade' : null);
+            return rowType === this.historyCurrentFilter;
         });
 
-        if (cardsContainer && this.operations.length === 0) {
-            cardsContainer.innerHTML = `
-                <div class="alert alert-secondary mb-0">Nenhuma operação encontrada. Toque em "Atualizar" para recarregar.</div>
-            `;
+        if (maxPages <= 1) {
+            if (this.historyPaginationNav) this.historyPaginationNav.style.display = 'none';
+            if (this.historyPaginationMobile) this.historyPaginationMobile.style.display = 'none';
+            return;
         }
+
+        if (this.historyPaginationNav) this.historyPaginationNav.style.display = 'block';
+        if (this.historyPaginationMobile) this.historyPaginationMobile.style.display = 'block';
+
+        // Desktop pagination
+        if (this.historyPrevPageBtn) {
+            this.historyPrevPageBtn.classList.toggle('disabled', this.historyCurrentPage === 1);
+        }
+        if (this.historyNextPageBtn) {
+            this.historyNextPageBtn.classList.toggle('disabled', this.historyCurrentPage >= maxPages);
+        }
+        if (this.historyPageInfo) {
+            this.historyPageInfo.innerHTML = `<span class="page-link">Página ${this.historyCurrentPage} de ${maxPages}</span>`;
+        }
+
+        // Mobile pagination
+        if (this.historyMobilePrevPageBtn) {
+            this.historyMobilePrevPageBtn.classList.toggle('disabled', this.historyCurrentPage === 1);
+        }
+        if (this.historyMobileNextPageBtn) {
+            this.historyMobileNextPageBtn.classList.toggle('disabled', this.historyCurrentPage >= maxPages);
+        }
+        if (this.historyMobilePageInfo) {
+            this.historyMobilePageInfo.innerHTML = `<span class="page-link">Página ${this.historyCurrentPage} de ${maxPages}</span>`;
+        }
+    }
+
+    _getHistoryMaxPages() {
+        const filtered = this.historyAllOperations.filter(op => {
+            if (this.historyCurrentFilter === 'all') return true;
+            const rowType = op.source === 'swing_trade' ? 'swing' : (op.source === 'daytrade' ? 'daytrade' : null);
+            return rowType === this.historyCurrentFilter;
+        });
+        return Math.ceil(filtered.length / this.historyItemsPerPage);
+    }
+
+    filterHistoryByType(filterType) {
+        this._renderHistoryPage();
+        this._updateHistoryPaginationControls();
+        this.updateStatistics();
     }
     
     async loadRecentOperations() {
@@ -1041,83 +1139,34 @@ class TradingApp {
     }
     
     updateStatistics() {
-        // Função auxiliar para identificar Swing Trade
-        function isSwing(op) {
-            // Novo critério: se vier do backend como 'swing_trade', é swing
-            if (op.source === 'swing_trade') return true;
-            // Critérios antigos para compatibilidade
-            const tradeType = (op.trade_type || op.tipo_operacao || '').toLowerCase();
-            const tfMajor = (op.timeframe_major || op.timeframe || '').toLowerCase();
-            if (op.is_swing === true || String(op.is_swing).toLowerCase() === 'true') return true;
-            if (tradeType.startsWith('swing')) return true;
-            if (tradeType.startsWith('day')) return false;
-            if (["diario","daily","1d","semanal","weekly","1w","d","w"].includes(tfMajor)) return true;
-            if (String(op.trade_type || op.tipo_operacao || '').toLowerCase().includes('swing')) return true;
-            return false;
+        // Filtrar operações conforme o filtro atual
+        let opsToAnalyze = this.historyAllOperations;
+        const showOpenCard = this.historyCurrentFilter !== 'all';
+        
+        if (this.historyCurrentFilter === 'swing') {
+            opsToAnalyze = this.historyAllOperations.filter(op => op.source === 'swing_trade');
+        } else if (this.historyCurrentFilter === 'daytrade') {
+            opsToAnalyze = this.historyAllOperations.filter(op => op.source === 'daytrade');
         }
 
-        // Filtro de operações da semana atual
-        function isThisWeek(op) {
-            if (!op.created_at) return false;
-            const opDate = new Date(op.created_at);
-            const now = new Date();
-            // Início da semana (segunda-feira)
-            const weekStart = new Date(now);
-            weekStart.setHours(0,0,0,0);
-            weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-            // Fim da semana (domingo)
-            const weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekStart.getDate() + 6);
-            weekEnd.setHours(23,59,59,999);
-            return opDate >= weekStart && opDate <= weekEnd;
+        // Calcular estatísticas
+        const successCount = opsToAnalyze.filter(op => (op.status || '').toUpperCase().includes('ALVO')).length;
+        const stopCount = opsToAnalyze.filter(op => (op.status || '').toUpperCase().includes('STOP')).length;
+        const openCount = opsToAnalyze.filter(op => (op.status || '').toUpperCase() === 'ABERTA').length;
+        const closedCount = successCount + stopCount;
+        const winRate = closedCount > 0 ? ((successCount / closedCount) * 100).toFixed(1) : 0;
+
+        // Atualizar elementos
+        document.getElementById('success-count').textContent = successCount;
+        document.getElementById('stop-count').textContent = stopCount;
+        document.getElementById('open-count').textContent = openCount;
+        document.getElementById('win-rate').textContent = `${winRate}%`;
+        
+        // Mostrar/esconder card de operações em andamento
+        const openCountCard = document.getElementById('open-count-card');
+        if (openCountCard) {
+            openCountCard.style.display = showOpenCard ? 'block' : 'none';
         }
-
-        // Separa operações da semana
-        const swingOps = this.operations.filter(op => isSwing(op) && isThisWeek(op));
-        const dayOps = this.operations.filter(op => !isSwing(op) && isThisWeek(op));
-
-        // Função para calcular estatísticas
-        function calcStats(ops) {
-            const total = ops.length;
-            const success = ops.filter(op => (op.status || '').includes('ALVO')).length;
-            const stops = ops.filter(op => (op.status || '').includes('STOP')).length;
-            const closed = success + stops;
-            const winRate = closed > 0 ? ((success / closed) * 100).toFixed(1) : 0;
-            let profit = 0;
-            ops.forEach(op => {
-                const qty = Number(op.quantidade) || 0;
-                if (!qty) return;
-                const entrada = Number(op.entrada) || 0;
-                const alvo = Number(op.alvo) || 0;
-                const stop = Number(op.stop) || 0;
-                const tipo = (op.tipo || 'COMPRA').toUpperCase();
-                const targetDiff = tipo === 'COMPRA' ? (alvo - entrada) : (entrada - alvo);
-                const stopDiff = tipo === 'COMPRA' ? (entrada - stop) : (stop - entrada);
-                if ((op.status || '').includes('ALVO')) {
-                    profit += Math.max(targetDiff, 0) * qty;
-                } else if ((op.status || '').includes('STOP')) {
-                    profit -= Math.max(stopDiff, 0) * qty;
-                }
-            });
-            const assets = new Set(ops.map(op => op.symbol)).size;
-            return { total, profit, winRate, assets };
-        }
-
-        // Calcula estatísticas
-        const swingStats = calcStats(swingOps);
-        const dayStats = calcStats(dayOps);
-
-        // Atualiza blocos Swing
-        document.getElementById('stats-operations-swing').textContent = swingStats.total;
-        document.getElementById('stats-profit-swing').textContent = this.formatCurrency(swingStats.profit);
-        document.getElementById('stats-winrate-swing').textContent = `${swingStats.winRate}%`;
-        document.getElementById('stats-assets-swing').textContent = swingStats.assets;
-
-        // Atualiza blocos Day
-        document.getElementById('stats-operations-day').textContent = dayStats.total;
-        document.getElementById('stats-profit-day').textContent = this.formatCurrency(dayStats.profit);
-        document.getElementById('stats-winrate-day').textContent = `${dayStats.winRate}%`;
-        document.getElementById('stats-assets-day').textContent = dayStats.assets;
     }
     
     getStatusBadgeClass(status) {
@@ -1606,20 +1655,20 @@ class TradingApp {
             });
         });
         
-        // Search button
-        document.getElementById('search-btn').addEventListener('click', async () => {
-            const query = document.getElementById('search-input').value.trim();
-            if (query) {
-                const results = await this.searchSymbol(query);
-                if (results.length > 0) {
-                    this.currentSymbol = results[0].symbol;
-                    this.loadChart(this.currentSymbol, this.currentInterval);
-                    this.showToast(`Ativo ${results[0].symbol} carregado`, 'success');
-                } else {
-                    this.showToast('Nenhum ativo encontrado', 'warning');
-                }
-            }
-        });
+        // Search button - REMOVIDO (campo de busca removido do navbar)
+        // document.getElementById('search-btn').addEventListener('click', async () => {
+        //     const query = document.getElementById('search-input').value.trim();
+        //     if (query) {
+        //         const results = await this.searchSymbol(query);
+        //         if (results.length > 0) {
+        //             this.currentSymbol = results[0].symbol;
+        //             this.loadChart(this.currentSymbol, this.currentInterval);
+        //             this.showToast(`Ativo ${results[0].symbol} carregado`, 'success');
+        //         } else {
+        //             this.showToast('Nenhum ativo encontrado', 'warning');
+        //         }
+        //     }
+        // });
         
         // Load chart button
         document.getElementById('load-chart-btn').addEventListener('click', () => {
@@ -1779,8 +1828,59 @@ class TradingApp {
         
         // Refresh history button
         document.getElementById('refresh-history-btn').addEventListener('click', () => {
+            this.historyCurrentPage = 1;
             this.loadOperationsHistory();
             this.showToast('Histórico atualizado', 'info');
+        });
+
+        // History filter buttons
+        const historyFilterGroup = document.getElementById('history-filter-group');
+        if (historyFilterGroup) {
+            historyFilterGroup.querySelectorAll('input[name="history-filter"]').forEach(radio => {
+                radio.addEventListener('change', () => {
+                    this.historyCurrentPage = 1;
+                    this.historyCurrentFilter = radio.value;
+                    this.filterHistoryByType(radio.value);
+                });
+            });
+        }
+
+        // History pagination - Desktop
+        this.historyPrevPageBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (this.historyCurrentPage > 1) {
+                this.historyCurrentPage--;
+                this._renderHistoryPage();
+                this._updateHistoryPaginationControls();
+            }
+        });
+        this.historyNextPageBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            const maxPages = this._getHistoryMaxPages();
+            if (this.historyCurrentPage < maxPages) {
+                this.historyCurrentPage++;
+                this._renderHistoryPage();
+                this._updateHistoryPaginationControls();
+            }
+        });
+
+        // History pagination - Mobile
+        this.historyMobilePrevPageBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (this.historyCurrentPage > 1) {
+                this.historyCurrentPage--;
+                this._renderHistoryPage();
+                this._updateHistoryPaginationControls();
+            }
+        });
+        this.historyMobileNextPageBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            const maxPages = this._getHistoryMaxPages();
+            if (this.historyCurrentPage < maxPages) {
+                this.historyCurrentPage++;
+                this._renderHistoryPage();
+                this._updateHistoryPaginationControls();
+            }
         });
         
         // Auto-calculate operation values - COMMENTED OUT (old Nova Operação section removed)
@@ -1915,6 +2015,14 @@ class PortfolioUI {
         this.buildBtn = document.getElementById('pf-build-btn');
         this.generatePdfBtn = document.getElementById('pf-generate-pdf');
         this.fillBtn = document.getElementById('pf-fill-demo');
+        // Paginação
+        this.allHistoryItems = [];
+        this.currentPage = 1;
+        this.itemsPerPage = 5;
+        this.paginationNav = document.getElementById('pf-pagination-nav');
+        this.prevPageBtn = document.getElementById('pf-prev-page');
+        this.nextPageBtn = document.getElementById('pf-next-page');
+        this.pageInfo = document.getElementById('pf-page-info');
         this.addBtn = document.getElementById('pf-add-asset');
         this.refreshBtn = document.getElementById('pf-refresh-history');
         this.lastPortfolioId = null;
@@ -1930,7 +2038,28 @@ class PortfolioUI {
         this.buildBtn?.addEventListener('click', () => this.buildPortfolio());
         this.fillBtn?.addEventListener('click', () => this.fillTestData());
         this.generatePdfBtn?.addEventListener('click', () => this.generatePdf());
-        this.refreshBtn?.addEventListener('click', () => this.loadHistory());
+        this.refreshBtn?.addEventListener('click', () => {
+            this.currentPage = 1;
+            this.loadHistory();
+        });
+        // Paginação
+        this.prevPageBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (this.currentPage > 1) {
+                this.currentPage--;
+                this._renderHistoryPage();
+                this._updatePaginationControls();
+            }
+        });
+        this.nextPageBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            const maxPages = Math.ceil(this.allHistoryItems.length / this.itemsPerPage);
+            if (this.currentPage < maxPages) {
+                this.currentPage++;
+                this._renderHistoryPage();
+                this._updatePaginationControls();
+            }
+        });
     }
 
     generatePdf() {
@@ -1960,6 +2089,7 @@ class PortfolioUI {
                 window.open(url, '_blank');
                 setTimeout(() => URL.revokeObjectURL(url), 60000);
                 this.showToast('PDF gerado com sucesso', 'success');
+                this._resetForm();
             })
             .catch((err) => {
                 console.error('Erro ao gerar PDF da carteira', err);
@@ -2326,24 +2456,102 @@ class PortfolioUI {
         try {
             const res = await fetch('/api/portfolio/v2/list');
             const data = await res.json();
-            const items = Array.isArray(data) ? data : [];
-            this.historyTbody.innerHTML = items.map(item => {
-                const assets = item.assets || [];
-                const names = assets.map(a => a.symbol).join(', ');
-                return `<tr>
-                    <td>${item.start_date} a ${item.end_date}</td>
-                    <td>${names}</td>
-                    <td>${item.created_at || '-'}</td>
-                </tr>`;
-            }).join('');
-            if (items.length > 0 && this.lastContainer) {
-                this.lastPortfolioId = items[0].id || items[0].portfolio_id || null;
-                this.lastPortfolio = items[0];
-                this._renderPortfolioView(items[0], this.lastContainer);
+            this.allHistoryItems = Array.isArray(data) ? data : [];
+            this.currentPage = 1;
+            this._renderHistoryPage();
+            this._updatePaginationControls();
+            
+            if (this.allHistoryItems.length > 0 && this.lastContainer) {
+                this.lastPortfolioId = this.allHistoryItems[0].id || this.allHistoryItems[0].portfolio_id || null;
+                this.lastPortfolio = this.allHistoryItems[0];
+                this._renderPortfolioView(this.allHistoryItems[0], this.lastContainer);
             }
         } catch (err) {
             console.error('Erro ao carregar histórico de carteiras', err);
             this.showToast('Erro ao carregar histórico de carteiras', 'danger');
         }
+    }
+
+    _renderHistoryPage() {
+        if (!this.historyTbody) return;
+        
+        const startIdx = (this.currentPage - 1) * this.itemsPerPage;
+        const endIdx = startIdx + this.itemsPerPage;
+        const pageItems = this.allHistoryItems.slice(startIdx, endIdx);
+        
+        this.historyTbody.innerHTML = pageItems.map(item => {
+            const assets = item.assets || [];
+            const names = assets.map(a => a.symbol).join(', ');
+            const portfolioId = item.id || item.portfolio_id;
+            const pdfButtonHtml = portfolioId 
+                ? `<button class="btn btn-sm btn-outline-danger download-portfolio-pdf" data-portfolio-id="${portfolioId}" title="Baixar PDF"><i class="fas fa-file-pdf"></i></button>`
+                : '';
+            return `<tr>
+                <td>${item.start_date} a ${item.end_date}</td>
+                <td>${names}</td>
+                <td>${item.created_at || '-'}</td>
+                <td>${pdfButtonHtml}</td>
+            </tr>`;
+        }).join('');
+        
+        // Adicionar event listeners aos botões de PDF
+        this.historyTbody.querySelectorAll('.download-portfolio-pdf').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const portfolioId = e.currentTarget.getAttribute('data-portfolio-id');
+                this.downloadPortfolioPdf(portfolioId);
+            });
+        });
+    }
+
+    _updatePaginationControls() {
+        if (!this.paginationNav) return;
+        
+        const maxPages = Math.ceil(this.allHistoryItems.length / this.itemsPerPage);
+        
+        if (maxPages <= 1) {
+            this.paginationNav.style.display = 'none';
+            return;
+        }
+        
+        this.paginationNav.style.display = 'block';
+        
+        // Atualizar estado dos botões
+        if (this.prevPageBtn) {
+            this.prevPageBtn.classList.toggle('disabled', this.currentPage === 1);
+        }
+        if (this.nextPageBtn) {
+            this.nextPageBtn.classList.toggle('disabled', this.currentPage >= maxPages);
+        }
+        
+        // Atualizar texto de página
+        if (this.pageInfo) {
+            this.pageInfo.innerHTML = `<span class="page-link">Página ${this.currentPage} de ${maxPages}</span>`;
+        }
+    }
+
+    downloadPortfolioPdf(portfolioId) {
+        const query = portfolioId ? `?id=${portfolioId}` : '';
+        fetch(`/api/portfolio/v2/pdf${query}`)
+            .then(async (res) => {
+                const ctype = res.headers.get('content-type') || '';
+                if (ctype.includes('application/json')) {
+                    const data = await res.json().catch(() => ({}));
+                    const detail = data && data.error ? `: ${data.error}` : '';
+                    this.showToast(`Falha ao gerar PDF${detail}`, 'warning');
+                    return;
+                }
+                if (!res.ok) {
+                    this.showToast('Falha ao gerar PDF', 'danger');
+                    return;
+                }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                window.open(url, '_blank');
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            })
+            .catch((err) => {
+                console.error('Erro ao gerar PDF da carteira', err);
+                this.showToast('Erro ao gerar PDF da carteira', 'danger');
+            });
     }
 }

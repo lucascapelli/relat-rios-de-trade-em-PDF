@@ -508,36 +508,76 @@ def render_base100_comparison_base64(
 def render_weekly_returns_bars_base64(
     weekly_returns: Sequence[float],
     labels: Optional[Sequence[str]] = None,
+    weekly_returns_ibov: Optional[Sequence[float]] = None,
     width: int = DEFAULT_WIDTH,
     height: int = 280,
 ) -> str:
     try:
-        series = pd.to_numeric(pd.Series(weekly_returns), errors="coerce").dropna()
-
-        if series.empty:
+        castling = pd.to_numeric(pd.Series(weekly_returns), errors="coerce").dropna()
+        
+        if castling.empty:
             raise ValueError("Dados insuficientes para gráfico de barras semanais")
 
-        x = np.arange(len(series))
-        if labels and len(labels) >= len(series):
-            tick_labels = list(labels)[: len(series)]
+        # Se tiver dados do IBOV, cria gráfico comparativo lado a lado
+        if weekly_returns_ibov and len(weekly_returns_ibov) > 0:
+            ibov = pd.to_numeric(pd.Series(weekly_returns_ibov), errors="coerce").dropna()
+            # Alinha os tamanhos
+            min_len = min(len(castling), len(ibov))
+            castling = castling.iloc[:min_len]
+            ibov = ibov.iloc[:min_len]
+            
+            x = np.arange(len(castling))
+            width_bar = 0.35
+            
+            if labels and len(labels) >= len(castling):
+                tick_labels = list(labels)[:len(castling)]
+            else:
+                tick_labels = [f"S{i + 1}" for i in range(len(castling))]
+            
+            fig, ax = plt.subplots(figsize=(width / 100.0, height / 100.0), dpi=200)
+            
+            # Barras lado a lado
+            ax.bar(x - width_bar/2, castling.values, width_bar, label="Castling Semanal", color="#C9A646", alpha=0.85)
+            ax.bar(x + width_bar/2, ibov.values, width_bar, label="IBOV", color="#111827", alpha=0.85)
+            
+            ax.axhline(0, color="#9ca3af", linewidth=0.9)
+            ax.set_title("Últimas 12 semanas", fontsize=10, color="#111827", fontweight="bold")
+            ax.set_ylabel("Retorno Semanal (%)", fontsize=8)
+            ax.grid(True, axis="y", linestyle=":", linewidth=0.6, alpha=0.6)
+            ax.set_facecolor("white")
+            fig.patch.set_facecolor("white")
+            
+            step = max(1, int(len(tick_labels) / 10)) if len(tick_labels) > 10 else 1
+            ax.set_xticks(x[::step])
+            ax.set_xticklabels(tick_labels[::step], rotation=45, ha="right", fontsize=7)
+            ax.tick_params(axis="y", labelsize=7)
+            
+            # Legenda
+            ax.legend(loc="upper right", fontsize=8, framealpha=0.95)
+            
         else:
-            tick_labels = [f"S{i + 1}" for i in range(len(series))]
-
-        colors_bar = np.where(series >= 0, "#2c8f74", "#d9534f")
-
-        fig, ax = plt.subplots(figsize=(width / 100.0, height / 100.0), dpi=200)
-        ax.bar(x, series.values, color=colors_bar, alpha=0.85)
-        ax.axhline(0, color="#9ca3af", linewidth=0.9)
-        ax.set_title("Últimas 12 semanas", fontsize=10, color="#111827")
-        ax.grid(True, axis="y", linestyle=":", linewidth=0.6, alpha=0.6)
-        ax.set_facecolor("white")
-        fig.patch.set_facecolor("white")
-
-        step = max(1, int(len(tick_labels) / 10)) if len(tick_labels) > 10 else 1
-        ax.set_xticks(x[::step])
-        ax.set_xticklabels(tick_labels[::step], rotation=45, ha="right", fontsize=7)
-        ax.tick_params(axis="y", labelsize=7)
-        ax.set_ylabel("% semanal", fontsize=8)
+            # Gráfico simples se não tiver IBOV
+            x = np.arange(len(castling))
+            if labels and len(labels) >= len(castling):
+                tick_labels = list(labels)[:len(castling)]
+            else:
+                tick_labels = [f"S{i + 1}" for i in range(len(castling))]
+            
+            colors_bar = np.where(castling >= 0, "#C9A646", "#d9534f")
+            
+            fig, ax = plt.subplots(figsize=(width / 100.0, height / 100.0), dpi=200)
+            ax.bar(x, castling.values, color=colors_bar, alpha=0.85)
+            ax.axhline(0, color="#9ca3af", linewidth=0.9)
+            ax.set_title("Últimas 12 semanas", fontsize=10, color="#111827")
+            ax.grid(True, axis="y", linestyle=":", linewidth=0.6, alpha=0.6)
+            ax.set_facecolor("white")
+            fig.patch.set_facecolor("white")
+            
+            step = max(1, int(len(tick_labels) / 10)) if len(tick_labels) > 10 else 1
+            ax.set_xticks(x[::step])
+            ax.set_xticklabels(tick_labels[::step], rotation=45, ha="right", fontsize=7)
+            ax.tick_params(axis="y", labelsize=7)
+            ax.set_ylabel("Retorno Semanal (%)", fontsize=8)
 
         fig.tight_layout()
         buffer = io.BytesIO()
@@ -1254,13 +1294,15 @@ class ChartGenerator:
         return render_base100_comparison_base64(castling, ibov, labels=labels, width=width, height=height)
 
     @staticmethod
+    @staticmethod
     def render_weekly_returns(
         weekly_returns: Sequence[float],
         labels: Optional[Sequence[str]] = None,
+        weekly_returns_ibov: Optional[Sequence[float]] = None,
         width: int = DEFAULT_WIDTH,
         height: int = 280,
     ) -> str:
-        return render_weekly_returns_bars_base64(weekly_returns, labels=labels, width=width, height=height)
+        return render_weekly_returns_bars_base64(weekly_returns, labels=labels, weekly_returns_ibov=weekly_returns_ibov, width=width, height=height)
 
     @staticmethod
     def render_portfolio_distribution(
