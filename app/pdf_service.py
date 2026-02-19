@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 from dataclasses import asdict
 from datetime import datetime
+from math import sqrt
 from typing import Dict, Optional
 
 from flask import render_template
@@ -37,6 +39,52 @@ def _safe_float(value: Optional[float], default: Optional[float] = None) -> Opti
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _preferred_static_asset(*relative_candidates: str, fallback: Optional[str] = None) -> Optional[str]:
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    for candidate in relative_candidates:
+        if os.path.exists(os.path.join(root_dir, candidate)):
+            return candidate
+    return fallback
+
+
+def _compute_drawdown_metrics(series_values) -> Dict[str, float]:
+    cleaned = []
+    for value in series_values or []:
+        casted = _safe_float(value)
+        if casted is not None:
+            cleaned.append(casted)
+
+    if len(cleaned) < 2:
+        return {"max_drawdown": 0.0, "ulcer_index": 0.0}
+
+    peak = cleaned[0]
+    drawdowns = []
+    for value in cleaned:
+        peak = max(peak, value)
+        if peak <= 0:
+            dd_pct = 0.0
+        else:
+            dd_pct = ((value / peak) - 1.0) * 100.0
+        drawdowns.append(dd_pct)
+
+    max_drawdown = min(drawdowns)
+    squared = [(abs(dd) ** 2) for dd in drawdowns]
+    ulcer_index = sqrt(sum(squared) / len(squared)) if squared else 0.0
+    return {
+        "max_drawdown": round(max_drawdown, 2),
+        "ulcer_index": round(ulcer_index, 2),
+    }
+
+
+def _round2(value: Optional[float], default: float = 0.0) -> float:
+    if value is None:
+        return float(default)
+    try:
+        return round(float(value), 2)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def default_weasyprint_engine(base_url: Optional[str] = None):
@@ -79,7 +127,23 @@ def build_pdf_payload_from_weekly_portfolio(
     if not branding_assets.cover_bottom_image:
         branding_assets.cover_bottom_image = "static/pdf/cover_bottom.svg"
     if not branding_assets.disclaimer_side_image:
-        branding_assets.disclaimer_side_image = "static/pdf/disclaimer_side.svg"
+        branding_assets.disclaimer_side_image = _preferred_static_asset(
+            "static/pdf/disclaimer_side.png",
+            "static/pdf/disclaimer_side.jpg",
+            "static/pdf/disclaimer_side.jpeg",
+            "static/pdf/disclaimer_side.svg",
+            fallback="static/pdf/disclaimer_side.svg",
+        )
+    if not branding_assets.selo_apimec_path:
+        branding_assets.selo_apimec_path = _preferred_static_asset(
+            "static/pdf/apimec sem fundo.png",
+            "static/pdf/selo_apimec.png",
+            "static/pdf/selo_apimec.jpg",
+            "static/pdf/selo_apimec.jpeg",
+            "static/pdf/selo_apimec.svg",
+            "static/pdf/apimec.png",
+            fallback=None,
+        )
 
     start_date = _format_date_str(portfolio_record.get("start_date"))
     end_date = _format_date_str(portfolio_record.get("end_date"))
@@ -133,25 +197,85 @@ def build_pdf_payload_from_weekly_portfolio(
     )
 
     perf = performance_data or portfolio_record.get("performance") or {}
+    generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
+    weekly_returns = (series_data or portfolio_record.get("series") or {}).get("weekly_returns", []) or []
+    if not weekly_returns:
+        weekly_returns = [0.6, -0.2, 1.1, 0.4, 0.9, -0.3]
+
+    parsed_weekly = []
+    for item in weekly_returns:
+        casted = _safe_float(item)
+        if casted is not None:
+            parsed_weekly.append(casted)
+
+    draw_metrics = _compute_drawdown_metrics((series_data or portfolio_record.get("series") or {}).get("cumulative_castling", []))
+
+    win_rate = float(perf.get("win_rate", 77.78))
+    avg_gain = float(perf.get("avg_gain", 1.65))
+    avg_loss = float(perf.get("avg_loss", -1.59))
+    num_positive = int(perf.get("num_castling_positive", 14))
+    num_negative = int(perf.get("num_castling_negative", 4))
+    num_finalized = int(perf.get("num_finalized", 18))
+    return_accumulated = float(perf.get("return_accumulated", 19.10))
+    return_ibov = float(perf.get("return_ibov", 16.53))
+
+    win_prob = max(0.0, min(1.0, win_rate / 100.0))
+    expectancy = (win_prob * avg_gain) + ((1.0 - win_prob) * avg_loss)
+    payoff = (avg_gain / abs(avg_loss)) if avg_loss not in (0, 0.0) else 0.0
+    win_loss_ratio = (num_positive / num_negative) if num_negative > 0 else float(num_positive)
+
+    weeks_count = max(1, len(parsed_weekly))
+    operations_per_week = num_finalized / weeks_count
+    operations_per_month = operations_per_week * 4.33
+
+    if len(parsed_weekly) > 1:
+        mean_weekly = sum(parsed_weekly) / len(parsed_weekly)
+        variance = sum((x - mean_weekly) ** 2 for x in parsed_weekly) / (len(parsed_weekly) - 1)
+        return_std = sqrt(variance)
+    else:
+        return_std = 0.0
+
+    excess_vs_benchmark = return_accumulated - return_ibov
+
+    summary_points = perf.get("executive_summary") or [
+        f"Geração de alpha acumulado de {excess_vs_benchmark:.2f} p.p. vs IBOV no período analisado.",
+        f"Eficiência risco-retorno com Sharpe {float(perf.get('sharpe', 3.07)):.2f} e drawdown máximo de {draw_metrics['max_drawdown']:.2f}%.",
+        f"Disciplina operacional com taxa de acerto de {win_rate:.2f}% e payoff médio de {payoff:.2f}.",
+        f"Cadência média de {operations_per_week:.2f} operações por semana ({operations_per_month:.2f}/mês).",
+    ]
+
     performance = PerformanceStats(
         # ESTATÍSTICA
-        num_finalized=int(perf.get("num_finalized", 18)),
+        num_finalized=num_finalized,
         num_castling_greater_ibov=int(perf.get("num_castling_greater_ibov", 9)),
-        num_castling_positive=int(perf.get("num_castling_positive", 14)),
-        num_castling_negative=int(perf.get("num_castling_negative", 4)),
-        win_rate=float(perf.get("win_rate", 77.78)),
-        avg_overall=float(perf.get("avg_overall", 0.93)),
-        avg_gain=float(perf.get("avg_gain", 1.65)),
-        avg_loss=float(perf.get("avg_loss", -1.59)),
-        vol_annualized=float(perf.get("vol_annualized", 11.27)),
+        num_castling_positive=num_positive,
+        num_castling_negative=num_negative,
+        win_rate=_round2(win_rate),
+        avg_overall=_round2(perf.get("avg_overall", 0.93)),
+        avg_gain=_round2(avg_gain),
+        avg_loss=_round2(avg_loss),
+        vol_annualized=_round2(perf.get("vol_annualized", 11.27)),
         # PERFORMANCE
-        risk_return=float(perf.get("risk_return", 5.83)),
-        return_accumulated=float(perf.get("return_accumulated", 19.10)),
-        return_ibov=float(perf.get("return_ibov", 16.53)),
-        alpha_pp=float(perf.get("alpha_pp", 2.57)),
-        sharpe=float(perf.get("sharpe", 3.07)),
-        profit_factor=float(perf.get("profit_factor", 3.65)),
-        return_annualized=float(perf.get("return_annualized", 65.69)),
+        risk_return=_round2(perf.get("risk_return", 5.83)),
+        return_accumulated=_round2(return_accumulated),
+        return_ibov=_round2(return_ibov),
+        alpha_pp=_round2(perf.get("alpha_pp", 2.57)),
+        sharpe=_round2(perf.get("sharpe", 3.07)),
+        profit_factor=_round2(perf.get("profit_factor", 3.65)),
+        return_annualized=_round2(perf.get("return_annualized", 65.69)),
+        max_drawdown=_round2(perf.get("max_drawdown", draw_metrics["max_drawdown"])),
+        expectancy_per_trade=_round2(perf.get("expectancy_per_trade", expectancy)),
+        payoff_medio=_round2(perf.get("payoff_medio", payoff)),
+        win_loss_ratio=_round2(perf.get("win_loss_ratio", win_loss_ratio)),
+        operations_per_week=_round2(perf.get("operations_per_week", operations_per_week)),
+        operations_per_month=_round2(perf.get("operations_per_month", operations_per_month)),
+        return_std=_round2(perf.get("return_std", return_std)),
+        ulcer_index=_round2(perf.get("ulcer_index", draw_metrics["ulcer_index"])),
+        excess_vs_benchmark=_round2(perf.get("excess_vs_benchmark", excess_vs_benchmark)),
+        generated_at=str(perf.get("generated_at", generated_at)),
+        model_version=str(perf.get("model_version", "Modelo Quantitativo v1.0")),
+        data_source=str(perf.get("data_source", "B3 / Market Data")),
+        executive_summary=[str(item) for item in summary_points][:5],
     )
 
     series_cfg = series_data or portfolio_record.get("series") or {}
@@ -171,7 +295,7 @@ def build_pdf_payload_from_weekly_portfolio(
     if not series.weekly_returns:
         series.weekly_returns = [0.6, -0.2, 1.1, 0.4, 0.9, -0.3]
         # Gera datas das últimas 12 semanas a partir de hoje
-        from datetime import datetime, timedelta
+        from datetime import timedelta
         today = datetime.now()
         week_labels = []
         for i in range(len(series.weekly_returns) - 1, -1, -1):
@@ -270,6 +394,14 @@ class PdfReportBuilder:
                     height=320,
                 )
 
+            if has_base100 and not getattr(series, "drawdown_chart", None):
+                series.drawdown_chart = ChartGenerator.render_drawdown_curve(
+                    series.cumulative_castling,
+                    labels=getattr(series, "cumulative_labels", None) or None,
+                    width=820,
+                    height=230,
+                )
+
             has_weekly = bool(getattr(series, "weekly_returns", None))
             if has_weekly and not getattr(series, "weekly_chart", None):
                 series.weekly_chart = ChartGenerator.render_weekly_returns(
@@ -287,8 +419,8 @@ class PdfReportBuilder:
                     portfolio.distribution_chart = ChartGenerator.render_portfolio_distribution(
                         labels,
                         weights,
-                        width=520,
-                        height=320,
+                        width=760,
+                        height=420,
                     )
         except Exception:
             logger.exception("Falha ao gerar graficos de performance para PDF")

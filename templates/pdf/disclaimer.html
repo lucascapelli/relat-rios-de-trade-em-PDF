@@ -3,6 +3,7 @@
     <div class="disclaimer-content">
         <div class="disclaimer-text">
             <h2>Quem somos?</h2>
+            <p class="disclaimer-subtitle">Estratégia, proteção e disciplina para decisões mais conscientes no mercado.</p>
             <p>No jogo de xadrez, o termo "castling" (roque) se refere a uma jogada que permite que o rei e a torre troquem de lugar no tabuleiro. Esta jogada é projetada para proteger o rei e também pode ser usada como uma manobra estratégica para melhorar a posição da torre.</p>
             <p>No mundo dos investimentos, o conceito de "castling" também pode ser aplicado à ideia de proteger seus ativos e fazer movimentos estratégicos para melhorar a carteira geral.</p>
 
@@ -14,26 +15,23 @@
             </div>
 
             <h4>Disclaimer</h4>
-            <p>{{ disclaimer_text }}</p>
-
-            <h4>Analista Responsável</h4>
-            <p>{{ compliance.analyst_name }} – CNPI: {{ compliance.analyst_cnpi }}</p>
+            <p class="legal-disclaimer">Este relatório de análise foi elaborado pela Castling LTDA (Castling), de acordo com todas as exigências previstas na Resolução CVM nº 20/2021, e tem como objetivo fornecer informações que possam auxiliar o investidor a tomar sua própria decisão de investimento, não constituindo qualquer tipo de oferta ou solicitação de compra e/ou venda de qualquer produto. As informações contidas neste relatório são consideradas válidas na data de sua divulgação e foram obtidas de fontes públicas. A Castling não se responsabiliza por qualquer decisão tomada pelo cliente com base no presente relatório. O(s) signatário(s) deste relatório - Gustavo Luis Massotti – CNPI: 6901 - declara(m) que as recomendações refletem única e exclusivamente suas análises e opiniões pessoais, que foram produzidas de forma independente, inclusive em relação à Castling e que estão sujeitas a modificações sem aviso prévio em decorrência de alterações nas condições de mercado. O analista responsável pelo conteúdo deste relatório e pelo cumprimento da Resolução CVM nº 20/2021 está indicado abaixo, sendo que, caso constem a indicação de mais de um analista no relatório, o responsável será o primeiro analista credenciado a ser mencionado no relatório. Os analistas da Castling estão obrigados ao cumprimento de todas as regras previstas no Código de Conduta da APIMEC para o Analista de Valores Mobiliários. Os produtos apresentados neste relatório podem não ser adequados para todos os tipos de cliente. Antes de qualquer decisão, os clientes deverão realizar o processo de suitability e confirmar se os produtos apresentados são indicados para o seu perfil de investidor. Este material não sugere qualquer alteração de carteira, mas somente orientação sobre produtos adequados a determinado perfil de investidor. Os instrumentos financeiros discutidos neste relatório podem não ser adequados para todos os investidores. Este relatório não leva em consideração os objetivos de investimento, situação financeira ou necessidades específicas de cada investidor. Os investidores devem obter orientação financeira independente, com base em suas características pessoais, antes de tomar uma decisão de investimento. A rentabilidade de produtos financeiros pode apresentar variações e seu preço ou valor pode aumentar ou diminuir num curto espaço de tempo. Os desempenhos anteriores não são necessariamente indicativos de resultados futuros. A rentabilidade divulgada não é líquida de impostos. As informações presentes neste material são baseadas em simulações e os resultados reais poderão ser significativamente diferentes. Em acordo com o Ofício Circular nº 6/2019/CVM/SIN, ressalta-se que: “(i) retornos passados, quando mencionados, se baseiem em fatos passíveis de demonstração, que servem apenas como referência histórica e não são garantia de retornos futuros; (ii) investimentos envolvem riscos e podem ensejar perdas, inclusive da totalidade do capital investido, ou mesmo a necessidade de aportes adicionais, conforme o caso; e (iii) os valores e percentuais de retorno foram estimados com base em informações disponíveis à época e consideradas confiáveis na avaliação do analista.” Este relatório é destinado à circulação exclusiva para a rede de relacionamento da Castling, podendo também ser divulgado no site da Castling e nos canais oficiais da mesma. Fica proibida sua reprodução ou redistribuição para qualquer pessoa, no todo ou em parte, qualquer que seja o propósito, sem o prévio consentimento expresso da Castling.</p>
         </div>
         <div class="disclaimer-side">
             {% if identity.branding.disclaimer_side_image %}
-                <img src="{{ identity.branding.disclaimer_side_image }}" alt="Disclaimer Side">
+                <img src="{{ identity.branding.disclaimer_side_image }}" alt="Disclaimer Side" class="disclaimer-side-img">
             {% endif %}
+
+            <section class="badges">
+                {% if identity.branding.selo_apimec_path %}
+                    <img src="{{ identity.branding.selo_apimec_path }}" alt="Selo APIMEC" class="badge-img">
+                {% endif %}
+                {% if identity.branding.selo_cvm_path %}
+                    <img src="{{ identity.branding.selo_cvm_path }}" alt="Selo CVM" class="badge-img">
+                {% endif %}
+            </section>
         </div>
     </div>
-
-    <section class="badges">
-        {% if identity.branding.selo_apimec_path %}
-            <img src="{{ identity.branding.selo_apimec_path }}" alt="Selo APIMEC" class="badge-img">
-        {% endif %}
-        {% if identity.branding.selo_cvm_path %}
-            <img src="{{ identity.branding.selo_cvm_path }}" alt="Selo CVM" class="badge-img">
-        {% endif %}
-    </section>
 
     <footer class="footer-link">
         <a href="{{ compliance.link }}">{{ compliance.link }}</a>

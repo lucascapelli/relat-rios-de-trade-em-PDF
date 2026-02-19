@@ -84,6 +84,21 @@ class PerformanceStats:
     sharpe: float
     profit_factor: float
     return_annualized: float
+    # MÉTRICAS AVANÇADAS
+    max_drawdown: float = 0.0
+    expectancy_per_trade: float = 0.0
+    payoff_medio: float = 0.0
+    win_loss_ratio: float = 0.0
+    operations_per_week: float = 0.0
+    operations_per_month: float = 0.0
+    return_std: float = 0.0
+    ulcer_index: float = 0.0
+    excess_vs_benchmark: float = 0.0
+    # METADADOS INSTITUCIONAIS
+    generated_at: str = ""
+    model_version: str = "Modelo Quantitativo v1.0"
+    data_source: str = "B3 / Market Data"
+    executive_summary: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -95,6 +110,7 @@ class SeriesData:
     weekly_labels: List[str] = field(default_factory=list)     # datas/labels das 12 semanas
     cumulative_labels: List[str] = field(default_factory=list)
     base100_chart: Optional[str] = None
+    drawdown_chart: Optional[str] = None
     weekly_chart: Optional[str] = None
 
 

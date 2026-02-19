@@ -1,7 +1,10 @@
 <!-- selection.html -->
 <section class="pdf-page selection-page">
     <header class="section-header ribbon-header">
-        <div class="ribbon">Seleção Atual</div>
+        <div class="selection-title-wrap">
+            <div class="ribbon">Seleção Atual</div>
+            <p class="selection-subtitle">Referência: {{ identity.period_end }} • {{ performance.model_version }}</p>
+        </div>
         <div class="section-icon">
             {% if identity.branding.icon_path %}
                 <img src="{{ identity.branding.icon_path }}" alt="Ícone" class="icon-img">
@@ -9,81 +12,116 @@
         </div>
     </header>
 
+    {% set rr_ns = namespace(max_rr=0.0) %}
+    {% for a in portfolio.assets %}
+        {% set risk_abs = (a.risco_pct if a.risco_pct >= 0 else (-a.risco_pct)) %}
+        {% set rr_value = (a.retorno_pct / risk_abs) if risk_abs > 0 else 0 %}
+        {% if rr_value > rr_ns.max_rr %}
+            {% set rr_ns.max_rr = rr_value %}
+        {% endif %}
+    {% endfor %}
+
     <table class="table-assets">
         <thead>
             <tr>
-                <th>Ação</th>
-                <th>Entrada</th>
-                <th>Ent. Máx</th>
-                <th>Ent. Mín</th>
-                <th>Alvo</th>
-                <th>Stop</th>
-                <th>Retorno</th>
-                <th>Risco</th>
-                <th>Risco 0</th>
+                <th class="th-left">Ação</th>
+                <th class="th-right">Entrada</th>
+                <th class="th-right">Alvo</th>
+                <th class="th-right">Stop</th>
+                <th class="th-right">Retorno</th>
+                <th class="th-right">Risco</th>
+                <th class="th-right">R/R</th>
+                <th class="th-right">Peso (%)</th>
             </tr>
         </thead>
         <tbody>
         {% for a in portfolio.assets %}
-            <tr>
+            {% set risk_abs = (a.risco_pct if a.risco_pct >= 0 else (-a.risco_pct)) %}
+            {% set rr_value = (a.retorno_pct / risk_abs) if risk_abs > 0 else 0 %}
+            {% set w = portfolio.weights[loop.index0] if portfolio.weights|length > loop.index0 else 0 %}
+            <tr class="{% if rr_ns.max_rr > 0 and rr_value >= (rr_ns.max_rr - 0.001) %}row-rr-best{% endif %}">
                 <td class="ticker">{{ a.symbol }}</td>
-                <td>{{ a.entrada | round(2) }}</td>
-                <td>{{ a.entrada_maxima if a.entrada_maxima is not none else '-' }}</td>
-                <td>{{ a.entrada_minima if a.entrada_minima is not none else '-' }}</td>
-                <td class="pos">{{ a.objetivo | round(2) }}</td>
-                <td class="neg">{{ a.stop_loss | round(2) }}</td>
-                <td class="pos">{{ a.retorno_pct | round(2) }}%</td>
-                <td class="neg">{{ a.risco_pct | round(2) }}%</td>
-                <td>{{ a.risco_zero_preco | round(2) }}</td>
+                <td class="num neutral">{{ '%.2f'|format(a.entrada) }}</td>
+                <td class="num neutral">{{ '%.2f'|format(a.objetivo) }}</td>
+                <td class="num neutral">{{ '%.2f'|format(a.stop_loss) }}</td>
+                <td class="num pos metric-main">{{ '%.2f'|format(a.retorno_pct) }}%</td>
+                <td class="num neg metric-main">{{ '%.2f'|format(a.risco_pct) }}%</td>
+                <td class="num rr {% if rr_ns.max_rr > 0 and rr_value >= (rr_ns.max_rr - 0.001) %}rr-best{% endif %}">{{ '%.2f'|format(rr_value) }}</td>
+                <td class="num neutral">{{ '%.2f'|format(w) }}</td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
 
     <div class="selection-grid">
-        <div class="delta-box">
+        <article class="movement-card">
+            <header class="movement-header">
+                <h4>Saiu / Entrou</h4>
+                <span class="movement-date">Movimentação: {{ identity.period_end }}</span>
+            </header>
             <table class="delta-table">
                 <thead>
                     <tr>
-                        <th>SAIU</th>
-                        <th>ENTROU</th>
+                        <th>Saiu</th>
+                        <th>Entrou</th>
+                        <th>Justificativa</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% set max_len = [portfolio.entered|length, portfolio.exited|length]|max %}
                     {% for idx in range(max_len) %}
                         <tr>
-                            <td>{{ portfolio.exited[idx] if portfolio.exited|length > idx else '' }}</td>
-                            <td>{{ portfolio.entered[idx] if portfolio.entered|length > idx else '' }}</td>
+                            <td>{{ portfolio.exited[idx] if portfolio.exited|length > idx else '—' }}</td>
+                            <td>{{ portfolio.entered[idx] if portfolio.entered|length > idx else '—' }}</td>
+                            <td class="justification">Rebalanceamento por risco/retorno e governança da carteira.</td>
                         </tr>
                     {% endfor %}
                     {% if max_len == 0 %}
                         <tr>
                             <td>—</td>
                             <td>—</td>
+                            <td class="justification">Sem alterações no período.</td>
                         </tr>
                     {% endif %}
                 </tbody>
             </table>
-        </div>
-        <div class="pie-box">
+        </article>
+
+        <article class="pie-box allocation-card">
+            <h4>Alocação da Carteira</h4>
             {% if portfolio.distribution_chart %}
                 <img src="{{ portfolio.distribution_chart }}" alt="Distribuição da Carteira" class="chart-img" />
             {% else %}
                 <div class="chart-placeholder">Distribuição indisponível.</div>
             {% endif %}
-        </div>
+            <ul class="allocation-list">
+                {% for a in portfolio.assets %}
+                    {% set w = portfolio.weights[loop.index0] if portfolio.weights|length > loop.index0 else 0 %}
+                    <li><span class="ticker">{{ a.symbol }}</span><span class="weight">{{ '%.2f'|format(w) }}%</span></li>
+                {% endfor %}
+            </ul>
+        </article>
     </div>
 
-    <section class="notes-section">
+    <section class="notes-section structured-notes">
         <h4>Comentários Técnicos</h4>
-        {% if portfolio.technical_notes %}
-            {% for note in portfolio.technical_notes %}
-                <p>{{ note }}</p>
+        {% if portfolio.assets %}
+            {% for a in portfolio.assets %}
+                <article class="note-item">
+                    <h5>{{ a.symbol }}</h5>
+                    <ul>
+                        <li><strong>Gatilho:</strong> Manutenção acima de {{ '%.2f'|format(a.entrada) }} com busca de {{ '%.2f'|format(a.objetivo) }}.</li>
+                        <li><strong>Contexto:</strong> Estrutura de retorno estimada em {{ '%.2f'|format(a.retorno_pct) }}% para risco de {{ '%.2f'|format(a.risco_pct) }}%.</li>
+                        <li><strong>Invalidação:</strong> Perda do nível de proteção em {{ '%.2f'|format(a.stop_loss) }}.</li>
+                    </ul>
+                </article>
             {% endfor %}
         {% else %}
             <p>Sem comentários técnicos informados.</p>
         {% endif %}
     </section>
-    <div class="footer-link"><a href="{{ editorial.link }}">{{ editorial.link }}</a></div>
+
+    <footer class="selection-footer">
+        Carteira recomendada com governança • {{ performance.model_version }} • {{ performance.generated_at }}
+    </footer>
 </section>

@@ -1,22 +1,40 @@
 <!-- intro.html -->
 <section class="pdf-page intro-page"
-  style="--page-bg: transparent; --page-color: {{ identity.branding.color_primary }}; --brand-accent: {{ identity.branding.color_accent }};">
-    <div class="frame-top" style="border-color: var(--brand-accent);"></div>
+  style="--page-bg: {{ identity.branding.color_primary }}; --page-color: {{ identity.branding.color_text }}; --brand-accent: {{ identity.branding.color_accent }};">
+    <div class="frame-top"></div>
     <div class="watermark">
         {% if identity.branding.watermark_path %}
             <img src="{{ identity.branding.watermark_path }}" alt="Watermark">
         {% endif %}
     </div>
     <div class="intro-content">
-        <h2 style="color: var(--page-color);">Bem-vindos à {{ identity.strategy_name }} da Castling.me!</h2>
-        <p class="intro-body">{{ editorial.body }}</p>
-        <p class="intro-body">
-            A carteira é composta por <strong>{{ editorial.assets_count }}</strong> ativos selecionados no início de cada semana.
+        <h2 class="intro-title">
+            Bem-vindos à Carteira Semanal da<br>
+            Castling.me!
+        </h2>
+        <p class="intro-subtitle">Relatório Oficial | Estratégia Semanal</p>
+
+        <p class="intro-body intro-block intro-narrative">
+            Se no xadrez clássico cada movimento é calculado para décadas, no speed chess a habilidade está em reagir rápido e com precisão. A Carteira Semanal da Castling.me segue essa lógica: operações curtas, disciplina rígida e movimentos rápidos, sempre buscando vantagem diante do mercado.
         </p>
-        <p class="intro-footnote">
-            Histórico desde {{ editorial.history_since }} · Benchmark: {{ editorial.benchmark }}
+
+        <p class="intro-body intro-block intro-technical">
+            A carteira é composta por <strong class="intro-highlight">cinco ativos</strong> selecionados no início de cada semana. A estratégia é objetiva: todas as posições são encerradas no leilão de fechamento da sexta-feira — ou antes, caso alcancem o alvo, o stop ou o ponto de risco zero.
+        </p>
+
+        <p class="intro-body intro-block intro-technical">
+            <strong class="intro-highlight">Desde janeiro de 2019</strong>, a carteira apresenta consistência operacional, frequentemente superando o desempenho do <strong class="intro-highlight">Benchmark: IBOV</strong>, com histórico sólido de semanas positivas.
+        </p>
+
+        <p class="intro-body intro-block intro-narrative">
+            Método e agilidade atuam de forma integrada. A proposta é capturar oportunidades semanais com disciplina de execução e controle de risco.
+        </p>
+
+        <p class="intro-final-callout">
+            Toda semana, cinco movimentos bem planejados.<br>
+            Toda semana, uma chance de sair à frente.
         </p>
     </div>
-    <div class="frame-bottom" style="border-color: var(--brand-accent);"></div>
+    <div class="frame-bottom"></div>
     <div class="footer-link"><a href="{{ editorial.link }}">{{ editorial.link }}</a></div>
 </section>

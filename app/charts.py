@@ -1,4 +1,5 @@
 import base64
+import colorsys
 import io
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -479,10 +480,13 @@ def render_base100_comparison_base64(
             tick_labels = [str(i + 1) for i in range(aligned_len)]
 
         fig, ax = plt.subplots(figsize=(width / 100.0, height / 100.0), dpi=200)
-        ax.plot(x, series_castling.values, label="Castling", color="#1E88E5", linewidth=2.0)
-        ax.plot(x, series_ibov.values, label="IBOV", color="#C9A646", linewidth=1.6, linestyle="--")
+        castling_color = "#1E88E5"
+        ibov_color = "#8B8F99"
+        ax.fill_between(x, series_castling.values, 100, color=castling_color, alpha=0.12, linewidth=0)
+        ax.plot(x, series_castling.values, label="Estratégia Castling", color=castling_color, linewidth=2.6, zorder=3)
+        ax.plot(x, series_ibov.values, label="IBOV", color=ibov_color, linewidth=1.3, linestyle="--", zorder=2)
         ax.set_title("Índice Base 100", fontsize=10, color="#111827")
-        ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.6)
+        ax.grid(True, linestyle="-", linewidth=0.5, alpha=0.16)
         ax.set_facecolor("white")
         fig.patch.set_facecolor("white")
         ax.legend(loc="upper left", fontsize=8, frameon=False)
@@ -493,6 +497,35 @@ def render_base100_comparison_base64(
         ax.set_xticklabels(tick_labels[::step], rotation=45, ha="right")
         ax.set_ylabel("Índice (base 100)", fontsize=8)
         ax.set_xlabel("")
+
+        final_castling = float(series_castling.values[-1])
+        final_ibov = float(series_ibov.values[-1])
+        final_castling_pct = final_castling - 100.0
+        final_ibov_pct = final_ibov - 100.0
+
+        ax.scatter([x[-1]], [final_castling], color=castling_color, s=14, zorder=5)
+        ax.annotate(
+            f"{final_castling_pct:+.2f}%",
+            xy=(x[-1], final_castling),
+            xytext=(-6, 10),
+            textcoords="offset points",
+            fontsize=7,
+            color=castling_color,
+            ha="right",
+            va="bottom",
+            fontweight="bold",
+        )
+        ax.scatter([x[-1]], [final_ibov], color=ibov_color, s=10, zorder=5)
+        ax.annotate(
+            f"{final_ibov_pct:+.2f}%",
+            xy=(x[-1], final_ibov),
+            xytext=(-6, -12),
+            textcoords="offset points",
+            fontsize=6.8,
+            color=ibov_color,
+            ha="right",
+            va="top",
+        )
 
         fig.tight_layout()
         buffer = io.BytesIO()
@@ -537,8 +570,10 @@ def render_weekly_returns_bars_base64(
             fig, ax = plt.subplots(figsize=(width / 100.0, height / 100.0), dpi=200)
             
             # Barras lado a lado
-            ax.bar(x - width_bar/2, castling.values, width_bar, label="Castling Semanal", color="#C9A646", alpha=0.85)
-            ax.bar(x + width_bar/2, ibov.values, width_bar, label="IBOV", color="#111827", alpha=0.85)
+            strategy_color = "#1E88E5"
+            benchmark_color = "#8B8F99"
+            ax.bar(x - width_bar/2, castling.values, width_bar, label="Castling Semanal", color=strategy_color, alpha=0.88)
+            ax.bar(x + width_bar/2, ibov.values, width_bar, label="IBOV", color=benchmark_color, alpha=0.88)
             
             ax.axhline(0, color="#9ca3af", linewidth=0.9)
             ax.set_title("Últimas 12 semanas", fontsize=10, color="#111827", fontweight="bold")
@@ -590,6 +625,69 @@ def render_weekly_returns_bars_base64(
         raise
 
 
+def render_drawdown_curve_base64(
+    cumulative_values: Sequence[float],
+    labels: Optional[Sequence[str]] = None,
+    width: int = DEFAULT_WIDTH,
+    height: int = 240,
+) -> str:
+    try:
+        series = pd.to_numeric(pd.Series(cumulative_values), errors="coerce").dropna()
+        if series.empty:
+            raise ValueError("Dados insuficientes para curva de drawdown")
+
+        peaks = series.cummax().replace(0, np.nan)
+        drawdown = ((series / peaks) - 1.0) * 100.0
+        drawdown = drawdown.fillna(0.0)
+        drawdown = drawdown.clip(upper=0.0)
+        drawdown = drawdown.where(drawdown.abs() > 1e-9, 0.0)
+
+        x = np.arange(len(drawdown))
+        if labels and len(labels) >= len(drawdown):
+            tick_labels = list(labels)[: len(drawdown)]
+        else:
+            tick_labels = [str(i + 1) for i in range(len(drawdown))]
+
+        fig, ax = plt.subplots(figsize=(width / 100.0, height / 100.0), dpi=200)
+        ax.fill_between(x, drawdown.values, 0, color="#D64545", alpha=0.18, linewidth=0)
+        ax.plot(x, drawdown.values, color="#C62828", linewidth=1.9, label="Drawdown (%)")
+        ax.axhline(0, color="#475569", linewidth=1.1)
+        ax.grid(True, linestyle="-", linewidth=0.45, alpha=0.16)
+        ax.set_title("Curva de Drawdown", fontsize=10, color="#111827")
+        ax.set_ylabel("Drawdown (%)", fontsize=8)
+        ax.tick_params(axis="both", labelsize=7)
+        ax.ticklabel_format(axis="y", style="plain", useOffset=False)
+        ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f"))
+
+        dd_min = float(drawdown.min()) if len(drawdown) else 0.0
+        min_idx = int(drawdown.idxmin()) if len(drawdown) else 0
+        if dd_min < -1e-6:
+            ax.scatter([min_idx], [dd_min], color="#B91C1C", s=12)
+            ax.annotate(
+                f"{dd_min:.2f}%",
+                xy=(min_idx, dd_min),
+                xytext=(0, -12),
+                textcoords="offset points",
+                fontsize=6.8,
+                color="#991B1B",
+                ha="center",
+                va="top",
+            )
+
+        step = max(1, int(len(tick_labels) / 8)) if len(tick_labels) > 8 else 1
+        ax.set_xticks(x[::step])
+        ax.set_xticklabels(tick_labels[::step], rotation=45, ha="right")
+
+        fig.tight_layout()
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format="png", dpi=200)
+        plt.close(fig)
+        return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("utf-8")
+    except Exception:
+        logger.exception("Erro ao gerar curva de drawdown", exc_info=True)
+        raise
+
+
 def render_portfolio_distribution_pie_base64(
     labels: Sequence[str],
     weights: Sequence[float],
@@ -609,21 +707,61 @@ def render_portfolio_distribution_pie_base64(
             series_labels = series_labels[:min_len]
             series_weights = series_weights.iloc[:min_len]
 
-        palette = list(colors) if colors else ["#c9a646", "#b08a4f", "#d8b06b", "#8b6b3f", "#a17a45"]
+        if colors:
+            palette = list(colors)
+        else:
+            # Tons monocromáticos mostarda (mesmo hue/saturation, variação de lightness)
+            base_hue = 0.12
+            base_saturation = 0.62
+            lightness_steps = [0.27, 0.36, 0.46, 0.56, 0.66]  # diferença de ~10% entre adjacentes
+            mustard_tones = []
+            for lightness in lightness_steps:
+                r, g, b = colorsys.hls_to_rgb(base_hue, lightness, base_saturation)
+                mustard_tones.append("#{:02X}{:02X}{:02X}".format(int(r * 255), int(g * 255), int(b * 255)))
+
+            # Tom mais escuro para maior peso (proxy de relevância estratégica)
+            rank_indices = list(np.argsort(-series_weights.values))
+            assigned_palette = [mustard_tones[-1]] * len(series_labels)
+            for rank, idx in enumerate(rank_indices):
+                tone = mustard_tones[min(rank, len(mustard_tones) - 1)]
+                assigned_palette[int(idx)] = tone
+            palette = assigned_palette
+
         while len(palette) < len(series_labels):
             palette.extend(palette)
         palette = palette[: len(series_labels)]
 
         fig, ax = plt.subplots(figsize=(width / 100.0, height / 100.0), dpi=200)
-        ax.pie(
+        wedges, _, autotexts = ax.pie(
             series_weights.values,
-            labels=[f"{label} ({weight:.1f}%)" for label, weight in zip(series_labels, series_weights.values)],
-            autopct=None,
+            labels=None,
+            autopct=lambda value: f"{value:.0f}%",
+            pctdistance=0.7,
             startangle=90,
             colors=palette,
-            textprops={"fontsize": 7, "color": "#374151"},
+            wedgeprops={"linewidth": 1.1, "edgecolor": "#FFFFFF"},
+            textprops={"fontsize": 8.6, "fontweight": "bold"},
         )
         ax.set_title("Distribuição da Carteira", fontsize=10, color="#111827")
+
+        for wedge, autotext in zip(wedges, autotexts):
+            r, g, b, _ = wedge.get_facecolor()
+            luminance = (0.299 * r) + (0.587 * g) + (0.114 * b)
+            autotext.set_color("#FFFFFF" if luminance < 0.52 else "#3B2A0D")
+
+        if len(series_weights) > 0:
+            avg_weight = float(series_weights.mean())
+            ax.text(
+                0,
+                0,
+                f"Alocação\n{avg_weight:.0f}% por ativo",
+                ha="center",
+                va="center",
+                fontsize=8.2,
+                color="#1F2937",
+                fontweight="600",
+            )
+
         ax.axis("equal")
         fig.tight_layout()
 
@@ -1294,6 +1432,14 @@ class ChartGenerator:
         return render_base100_comparison_base64(castling, ibov, labels=labels, width=width, height=height)
 
     @staticmethod
+    def render_drawdown_curve(
+        cumulative_values: Sequence[float],
+        labels: Optional[Sequence[str]] = None,
+        width: int = DEFAULT_WIDTH,
+        height: int = 240,
+    ) -> str:
+        return render_drawdown_curve_base64(cumulative_values, labels=labels, width=width, height=height)
+
     @staticmethod
     def render_weekly_returns(
         weekly_returns: Sequence[float],
@@ -1320,6 +1466,7 @@ __all__ = [
     "prepare_ohlc_dataframe",
     "render_price_chart_base64",
     "render_base100_comparison_base64",
+    "render_drawdown_curve_base64",
     "render_weekly_returns_bars_base64",
     "render_portfolio_distribution_pie_base64",
     "format_timeframe_label",

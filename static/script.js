@@ -2027,6 +2027,7 @@ class PortfolioUI {
         this.refreshBtn = document.getElementById('pf-refresh-history');
         this.lastPortfolioId = null;
         this.lastPortfolio = null;
+        this.isGeneratingPdf = false;
         this._wireEvents();
         this._setDefaultDates();
         this._addAssetRow();
@@ -2064,11 +2065,18 @@ class PortfolioUI {
 
     generatePdf() {
         const id = this.lastPortfolioId;
-        const query = id ? `?id=${id}` : '';
         if (!id) {
             this.showToast('Nenhuma carteira salva para gerar PDF. Salve ou recarregue o histórico.', 'info');
+            return;
         }
-        fetch(`/api/portfolio/v2/pdf${query}`)
+        if (this.isGeneratingPdf) {
+            return;
+        }
+        this.isGeneratingPdf = true;
+        this._setButtonLoading(this.generatePdfBtn, true, 'Gerando PDF...');
+        this.showToast('Gerando PDF da carteira...', 'info');
+
+        fetch(`/api/portfolio/v2/pdf?portfolio_id=${encodeURIComponent(id)}`)
             .then(async (res) => {
                 const ctype = res.headers.get('content-type') || '';
                 if (ctype.includes('application/json')) {
@@ -2088,13 +2096,45 @@ class PortfolioUI {
                 const url = URL.createObjectURL(blob);
                 window.open(url, '_blank');
                 setTimeout(() => URL.revokeObjectURL(url), 60000);
-                this.showToast('PDF gerado com sucesso', 'success');
-                this._resetForm();
+                this.showToast('PDF aberto com sucesso', 'success');
             })
             .catch((err) => {
                 console.error('Erro ao gerar PDF da carteira', err);
                 this.showToast('Erro ao gerar PDF da carteira', 'danger');
+            })
+            .finally(() => {
+                this.isGeneratingPdf = false;
+                this._setButtonLoading(this.generatePdfBtn, false);
             });
+    }
+
+    _setButtonLoading(button, loading, loadingText = 'Processando...') {
+        if (!button) return;
+        if (!button.dataset.originalHtml) {
+            button.dataset.originalHtml = button.innerHTML;
+        }
+        button.disabled = !!loading;
+        button.classList.toggle('disabled', !!loading);
+        if (loading) {
+            button.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>${loadingText}`;
+        } else {
+            button.innerHTML = button.dataset.originalHtml || button.innerHTML;
+        }
+    }
+
+    _formatDateTime(value) {
+        if (!value) return '-';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return String(value);
+        }
+        return date.toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
     }
 
     fillTestData() {
@@ -2483,13 +2523,14 @@ class PortfolioUI {
             const assets = item.assets || [];
             const names = assets.map(a => a.symbol).join(', ');
             const portfolioId = item.id || item.portfolio_id;
+            const createdAt = this._formatDateTime(item.created_at);
             const pdfButtonHtml = portfolioId 
-                ? `<button class="btn btn-sm btn-outline-danger download-portfolio-pdf" data-portfolio-id="${portfolioId}" title="Baixar PDF"><i class="fas fa-file-pdf"></i></button>`
+                ? `<button class="btn btn-sm btn-outline-danger download-portfolio-pdf" data-portfolio-id="${portfolioId}" title="Abrir PDF"><i class="fas fa-file-pdf me-1"></i>Abrir PDF</button>`
                 : '';
             return `<tr>
                 <td>${item.start_date} a ${item.end_date}</td>
                 <td>${names}</td>
-                <td>${item.created_at || '-'}</td>
+                <td>${createdAt}</td>
                 <td>${pdfButtonHtml}</td>
             </tr>`;
         }).join('');
@@ -2497,8 +2538,10 @@ class PortfolioUI {
         // Adicionar event listeners aos botões de PDF
         this.historyTbody.querySelectorAll('.download-portfolio-pdf').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const portfolioId = e.currentTarget.getAttribute('data-portfolio-id');
-                this.downloadPortfolioPdf(portfolioId);
+                e.preventDefault();
+                const button = e.currentTarget;
+                const portfolioId = button.getAttribute('data-portfolio-id');
+                this.downloadPortfolioPdf(portfolioId, button);
             });
         });
     }
@@ -2529,9 +2572,21 @@ class PortfolioUI {
         }
     }
 
-    downloadPortfolioPdf(portfolioId) {
-        const query = portfolioId ? `?id=${portfolioId}` : '';
-        fetch(`/api/portfolio/v2/pdf${query}`)
+    downloadPortfolioPdf(portfolioId, triggerButton = null) {
+        const normalizedId = Number.parseInt(portfolioId, 10);
+        if (!Number.isFinite(normalizedId) || normalizedId <= 0) {
+            this.showToast('Carteira inválida para abrir PDF', 'warning');
+            return;
+        }
+
+        if (triggerButton?.disabled) {
+            return;
+        }
+
+        this._setButtonLoading(triggerButton, true, 'Abrindo...');
+        this.showToast('Abrindo PDF da carteira...', 'info');
+
+        fetch(`/api/portfolio/v2/pdf?portfolio_id=${encodeURIComponent(normalizedId)}`)
             .then(async (res) => {
                 const ctype = res.headers.get('content-type') || '';
                 if (ctype.includes('application/json')) {
@@ -2548,10 +2603,14 @@ class PortfolioUI {
                 const url = URL.createObjectURL(blob);
                 window.open(url, '_blank');
                 setTimeout(() => URL.revokeObjectURL(url), 60000);
+                this.showToast('PDF aberto com sucesso', 'success');
             })
             .catch((err) => {
                 console.error('Erro ao gerar PDF da carteira', err);
                 this.showToast('Erro ao gerar PDF da carteira', 'danger');
+            })
+            .finally(() => {
+                this._setButtonLoading(triggerButton, false);
             });
     }
 }

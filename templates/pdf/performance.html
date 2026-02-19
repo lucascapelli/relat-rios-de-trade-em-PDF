@@ -2,47 +2,69 @@
 <section class="pdf-page performance-page">
     <header class="section-header ribbon-header">
         <div class="ribbon">Como foi até aqui?</div>
-        <div class="section-icon">
-            {% if identity.branding.icon_path %}
-                <img src="{{ identity.branding.icon_path }}" alt="Ícone" class="icon-img">
-            {% endif %}
+        <div class="header-meta-wrap">
+            <div class="performance-meta-mini">{{ performance.model_version }} • {{ performance.generated_at }}</div>
+            <div class="section-icon">
+                {% if identity.branding.icon_path %}
+                    <img src="{{ identity.branding.icon_path }}" alt="Ícone" class="icon-img">
+                {% endif %}
+            </div>
         </div>
     </header>
 
-    <div class="performance-grid">
-        <div class="stats-column">
-            <table class="stats-table">
+    <section class="executive-analysis">
+        <h4>Análise Executiva</h4>
+        <p class="executive-intro">A estratégia apresenta desempenho consistente no período, combinando geração de alpha, disciplina de risco e estabilidade operacional frente ao benchmark.</p>
+        <ul class="executive-points">
+            {% for point in performance.executive_summary %}
+                <li>{{ point }}</li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <section class="kpi-row">
+        <article class="kpi-card kpi-highlight">
+            <span class="kpi-label">Sharpe</span>
+            <strong class="kpi-value">{{ '%.2f'|format(performance.sharpe) }}</strong>
+        </article>
+        <article class="kpi-card kpi-highlight">
+            <span class="kpi-label">Retorno Anualizado</span>
+            <strong class="kpi-value">{{ '%.2f'|format(performance.return_annualized) }}%</strong>
+        </article>
+        <article class="kpi-card kpi-highlight">
+            <span class="kpi-label">Alpha vs IBOV</span>
+            <strong class="kpi-value">{{ '%.2f'|format(performance.excess_vs_benchmark) }} p.p.</strong>
+        </article>
+    </section>
+
+    <div class="performance-grid performance-grid-v2">
+        <div class="stats-column stats-column-v2">
+            <table class="stats-table metrics-table">
                 <thead>
-                    <tr><th colspan="2">ESTATÍSTICA</th></tr>
+                    <tr><th colspan="2">Métricas Quantitativas</th></tr>
                 </thead>
                 <tbody>
-                    <tr><td>N. de finalizados</td><td>{{ performance.num_finalized }}</td></tr>
-                    <tr><td>N. Castling > IBOV</td><td>{{ performance.num_castling_greater_ibov }}</td></tr>
-                    <tr><td>N. Castling > 0</td><td>{{ performance.num_castling_positive }}</td></tr>
-                    <tr><td>N. Castling < 0</td><td>{{ performance.num_castling_negative }}</td></tr>
-                    <tr><td>Taxa de acerto</td><td>{{ performance.win_rate }}%</td></tr>
-                    <tr><td>Média</td><td>{{ performance.avg_overall }}%</td></tr>
-                    <tr><td>Média dos ganhos</td><td>{{ performance.avg_gain }}%</td></tr>
-                    <tr><td>Média das perdas</td><td>{{ performance.avg_loss }}%</td></tr>
-                    <tr><td>Volatilidade Anualizada</td><td>{{ performance.vol_annualized }}%</td></tr>
-                </tbody>
-            </table>
-            <table class="stats-table">
-                <thead>
-                    <tr><th colspan="2">PERFORMANCE</th></tr>
-                </thead>
-                <tbody>
-                    <tr><td>Risco/Retorno</td><td>{{ performance.risk_return }}</td></tr>
-                    <tr><td>Retorno Acumulado</td><td>{{ performance.return_accumulated }}%</td></tr>
-                    <tr><td>Retorno IBOV</td><td>{{ performance.return_ibov }}%</td></tr>
-                    <tr><td>Alpha P.P.</td><td>{{ performance.alpha_pp }}%</td></tr>
-                    <tr><td>Razão de Sharpe</td><td>{{ performance.sharpe }}</td></tr>
-                    <tr><td>Fator de Lucro</td><td>{{ performance.profit_factor }}</td></tr>
-                    <tr><td>Retorno Anualizado</td><td>{{ performance.return_annualized }}%</td></tr>
+                    <tr><td>Período analisado</td><td>{{ identity.period_start }} a {{ identity.period_end }}</td></tr>
+                    <tr><td>Data de geração</td><td>{{ performance.generated_at }}</td></tr>
+                    <tr><td>Versão do modelo</td><td>{{ performance.model_version }}</td></tr>
+                    <tr><td>Fonte de dados</td><td>{{ performance.data_source }}</td></tr>
+                    <tr class="metric-strong"><td>Retorno Acumulado</td><td>{{ '%.2f'|format(performance.return_accumulated) }}%</td></tr>
+                    <tr><td>Retorno IBOV</td><td>{{ '%.2f'|format(performance.return_ibov) }}%</td></tr>
+                    <tr><td>Comparativo vs Benchmark</td><td>{{ '%.2f'|format(performance.excess_vs_benchmark) }} p.p.</td></tr>
+                    <tr class="metric-strong"><td>Máximo Drawdown</td><td>{{ '%.2f'|format(performance.max_drawdown) }}%</td></tr>
+                    <tr><td>Ulcer Index</td><td>{{ '%.2f'|format(performance.ulcer_index) }}</td></tr>
+                    <tr><td>Expectância por operação</td><td>{{ '%.2f'|format(performance.expectancy_per_trade) }}%</td></tr>
+                    <tr><td>Payoff médio</td><td>{{ '%.2f'|format(performance.payoff_medio) }}</td></tr>
+                    <tr><td>Win/Loss Ratio</td><td>{{ '%.2f'|format(performance.win_loss_ratio) }}</td></tr>
+                    <tr><td>Desvio padrão retornos</td><td>{{ '%.2f'|format(performance.return_std) }}%</td></tr>
+                    <tr><td>Operações por semana</td><td>{{ '%.2f'|format(performance.operations_per_week) }}</td></tr>
+                    <tr><td>Operações por mês</td><td>{{ '%.2f'|format(performance.operations_per_month) }}</td></tr>
+                    <tr class="metric-strong"><td>Retorno Anualizado</td><td>{{ '%.2f'|format(performance.return_annualized) }}%</td></tr>
+                    <tr class="metric-strong"><td>Razão de Sharpe</td><td>{{ '%.2f'|format(performance.sharpe) }}</td></tr>
                 </tbody>
             </table>
         </div>
-        <div class="charts-column">
+        <div class="charts-column charts-column-v2">
             <div class="chart-box">
                 <h4>Índice Base 100</h4>
                 {% if series.base100_chart %}
@@ -51,6 +73,16 @@
                     <div class="chart-placeholder">Gráfico indisponível.</div>
                 {% else %}
                     <div class="chart-placeholder">Sem série histórica fornecida.</div>
+                {% endif %}
+            </div>
+            <div class="chart-box">
+                <h4>Curva de Drawdown</h4>
+                {% if performance.max_drawdown <= -0.05 and series.drawdown_chart %}
+                    <img src="{{ series.drawdown_chart }}" alt="Curva de Drawdown" class="chart-img" />
+                {% elif series.cumulative_castling %}
+                    <div class="chart-placeholder chart-placeholder-info">Sem drawdown relevante no período analisado.</div>
+                {% else %}
+                    <div class="chart-placeholder">Sem dados para drawdown.</div>
                 {% endif %}
             </div>
             <div class="chart-box">
@@ -66,9 +98,24 @@
         </div>
     </div>
 
-    <section class="compliance-notes">
-        <h4>Instruções de execução</h4>
-        <p>Recomendamos a execução das ordens de stop loss e take profit o mais próximo possível dos preços de referência. Caso o ativo abra em gap, ultrapassando os níveis de execução do stop ou do take profit, sugerimos a saída imediata ao de melhor preço disponível. Eventos extraordinários podem resultar em uma maior perda dos parâmetros previamente estabelecidos para stop ou alvo. No caso de saídas parciais, o procedimento operacional consiste em encerrar metade da posição no nível pré-definido para a saída parcial e ajustar o preço de entrada como o novo stop loss. É importante destacar que essa operação de saída parcial não é contabilizada no retorno total da operação.</p>
-        <p>Por fim, operações automatizadas podem ser encerradas ou ter seus parâmetros ajustados a critério do analista.</p>
+    <section class="methodology-grid">
+        <article class="method-card">
+            <h4>Regime de mercado favorecido</h4>
+            <p>O modelo tende a performar melhor em regimes com tendência definida, dispersão setorial moderada e volatilidade controlada, nos quais filtros de entrada conseguem capturar continuidade de movimento com risco calibrado.</p>
+        </article>
+        <article class="method-card">
+            <h4>Condições de pior desempenho</h4>
+            <p>Ambientes de reversão brusca, gaps frequentes e choques exógenos elevam o risco de ruído direcional e reduzem a eficiência estatística. Nesses cenários, o modelo pode apresentar deterioração temporária de payoff e taxa de acerto.</p>
+        </article>
     </section>
+
+    <section class="compliance-notes methodology-notes">
+        <h4>Diretrizes metodológicas</h4>
+        <p>Parâmetros são revisados em rotina periódica com validação fora da amostra e monitoramento contínuo de estabilidade. Ajustes são aplicados apenas quando há evidência estatística de ganho de robustez, preservando consistência histórica da estratégia.</p>
+        <p>Política de risco: o modelo prevê redução de exposição e/ou encerramento tático quando limites de volatilidade, drawdown ou risco extremo são acionados, priorizando preservação de capital e controle de cauda.</p>
+    </section>
+
+    <footer class="performance-footer">
+        Documento de gestão quantitativa • Castling • Atualização periódica conforme governança do modelo
+    </footer>
 </section>
